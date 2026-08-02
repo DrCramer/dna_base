@@ -1,0 +1,37 @@
+.venv/
+node_modules/
+dist/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.pyc
+.env
+*.sqlite
+storage/
+
+# Local/editor/runtime artifacts
+.codex/
+.playwright-mcp/
+*.log
+*.tmp
+.DS_Store
+
+# Frontend build output
+frontend/dist/
+frontend/.vite/
+/package-lock.json
+
+# Local project copy/export, not source
+ready_dna_base/
+
+# Local lab/import data and backups
+realtime/
+postgres_data/
+*.sql
+*.tgz
+*.zip
+
+# Local QA screenshots/snapshots
+/*.png
+/rt-import-*.yml
