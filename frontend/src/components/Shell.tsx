@@ -1,4 +1,4 @@
-import { BarChart3, ChevronDown, ChevronRight, ClipboardList, Database, FileDown, FileText, Home, LogOut, Minus, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Plus, RotateCcw, Search, Sun, Upload, Users, Waves } from 'lucide-react'
+import { BarChart3, ChevronDown, ChevronRight, ClipboardList, Database, FileDown, FileText, Home, LogOut, Minus, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Plus, Printer, RotateCcw, Search, Sun, Upload, Users, Waves } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { User } from '../api/types'
@@ -47,6 +47,7 @@ export function Shell({ user, active, onNavigate, onLogout, theme, themeMode, on
     { id: 'work-sessions', label: 'Массовое заполнение', icon: ClipboardList, visible: canEdit },
     { id: 'search', label: 'Поиск', icon: Search, visible: true },
     { id: 'reports', label: 'Отчёты', icon: BarChart3, visible: true },
+    { id: 'print', label: 'Печать DOCX', icon: Printer, visible: true },
     { id: 'employees', label: 'Справочники', icon: Users, visible: true }
   ]
   const importItems = [

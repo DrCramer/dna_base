@@ -11,6 +11,7 @@
 - Массовое заполнение этапов по выбранным партиям и объектам.
 - Импорт RT/qPCR-файлов `.xls`, `.xlsx`, `.csv`.
 - Экспорт реестра обратно в Excel-формат.
+- Пакетная сортировка DOCX по списку номеров и сборка PDF для печати.
 - Справочники сотрудников и лабораторных значений.
 - Поиск по объектам, партиям, этапам, исполнителям и RT-результатам.
 - Отчёты по партиям, ходу работ, статистике и контрольным полям.
@@ -24,6 +25,7 @@
 - Database: PostgreSQL 16.
 - Frontend: React, TypeScript, Vite.
 - Excel: `python-calamine`, `openpyxl`.
+- PDF/печать: LibreOffice headless, `pypdf`, PyMuPDF.
 - Runtime: Docker Compose, nginx.
 
 ## Быстрый запуск
@@ -64,6 +66,7 @@ POSTGRES_DB=dna_registry
 POSTGRES_USER=dna
 POSTGRES_PASSWORD=replace-with-a-strong-db-password
 SECRET_KEY=replace-with-a-long-random-secret
+PRINT_DATA_DIR=/app/data/print
 APP_PORT=4001
 ```
 

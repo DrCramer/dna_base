@@ -35,3 +35,4 @@ postgres_data/
 # Local QA screenshots/snapshots
 /*.png
 /rt-import-*.yml
+menu_screenshots/

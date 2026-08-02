@@ -8,6 +8,7 @@ import { LoginPage } from './pages/LoginPage'
 import { ObjectDetailPage } from './pages/ObjectDetailPage'
 import { ObjectsPage } from './pages/ObjectsPage'
 import { PartiesPage } from './pages/PartiesPage'
+import { PrintPage } from './pages/PrintPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { SearchPage } from './pages/SearchPage'
 import { EmployeesPage } from './pages/EmployeesPage'
@@ -121,6 +122,7 @@ export function App() {
   else if (view === 'search') page = <SearchPage onObjectOpen={setObjectId} />
   else if (view === 'reports') page = <ReportsPage user={user} onPartyOpen={openPartyInParties} />
   else if (view === 'employees') page = <EmployeesPage user={user} />
+  else if (view === 'print') page = <PrintPage />
   else if (view === 'registry-import') page = <RegistryImportPage />
   else if (view === 'rt-import') page = <RtImportPage />
   else if (view === 'electrophoresis-import') page = <ElectrophoresisImportPage />

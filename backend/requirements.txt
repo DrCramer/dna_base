@@ -8,11 +8,15 @@ alembic==1.14.0
 pydantic==2.10.4
 pydantic-settings==2.7.0
 python-multipart==0.0.20
+jinja2==3.1.6
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 python-calamine==0.3.1
 openpyxl==3.1.5
+pypdf==5.9.0
+pymupdf==1.26.3
+pillow==11.3.0
 pytest==8.3.4
 pytest-asyncio==0.25.2
 httpx==0.28.1

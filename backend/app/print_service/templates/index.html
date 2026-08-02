@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Порядок печати DOCX</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/print/static/styles.css?v=20260802-registration-stamp-style" />
+  </head>
+  <body class="{% if embedded %}embedded{% endif %}" data-can-edit="{% if can_edit %}1{% else %}0{% endif %}">
+    <header class="app-header">
+      <div class="header-inner">
+        <div class="brand">
+          <h1>Порядок печати DOCX</h1>
+          <p>Соберите документы в PDF в нужной последовательности</p>
+        </div>
+        <div class="header-actions">
+          <span id="taskStatus" class="status-pill neutral" aria-live="polite">Нет задания</span>
+          <button id="newTaskButton" class="secondary" type="button">Новая задача</button>
+          <div class="menu-wrap">
+            <button id="menuButton" class="icon-button" type="button" aria-label="Дополнительные действия" aria-expanded="false">⋯</button>
+            <div id="taskMenu" class="task-menu" hidden>
+              <a id="menuReportLink" href="#" aria-disabled="true">Скачать отчёт CSV</a>
+              <button id="menuDetailsButton" type="button">Сведения о задаче</button>
+              <button id="menuPrintButton" type="button">Справка о печати</button>
+              <button id="menuDeleteButton" class="danger-link" type="button">Удалить текущую задачу</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div id="downloadBar" class="download-bar" hidden>
+      <strong id="downloadTitle">Готово</strong>
+      <div id="downloadActions"></div>
+    </div>
+
+    <main class="app-shell">
+      <nav class="stepper" aria-label="Этапы задачи">
+        <button class="step-item" type="button" data-step="documents">
+          <span class="step-dot">1</span>
+          <span>Документы</span>
+        </button>
+        <button class="step-item" type="button" data-step="order">
+          <span class="step-dot">2</span>
+          <span>Порядок</span>
+        </button>
+        <button class="step-item" type="button" data-step="check">
+          <span class="step-dot">3</span>
+          <span>Проверка</span>
+        </button>
+        <button class="step-item" type="button" data-step="result">
+          <span class="step-dot">4</span>
+          <span>Результат</span>
+        </button>
+      </nav>
+
+      <section id="documentsScreen" class="screen" aria-labelledby="documentsTitle">
+        <div class="hero-panel">
+          <div class="hero-copy">
+            <p class="eyebrow">Шаг 1 из 4</p>
+            <h2 id="documentsTitle">Подготовим документы к печати</h2>
+            <p>Загрузите DOCX или ZIP, затем укажите нужный порядок.</p>
+          </div>
+          <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="Загрузить документы">
+            <input id="fileInput" type="file" multiple accept=".docx,.zip,.xlsx" />
+            <strong>Перетащите документы сюда</strong>
+            <span>DOCX, ZIP или XLSX</span>
+            <button id="selectFilesButton" type="button">Выбрать файлы</button>
+            <small>До 2000 DOCX за одну задачу</small>
+          </div>
+        </div>
+
+        <div id="uploadSummary" class="summary-panel" hidden>
+          <div>
+            <span id="uploadStatus" class="status-pill good">Документы загружены</span>
+            <strong id="acceptedCount">0 DOCX</strong>
+            <p id="excelCountText">Excel-файл не выбран</p>
+          </div>
+          <button id="showFilesButton" class="secondary" type="button">Показать файлы</button>
+        </div>
+      </section>
+
+      <section id="orderScreen" class="screen" aria-labelledby="orderTitle" hidden>
+        <div class="screen-head">
+          <p class="eyebrow">Шаг 2 из 4</p>
+          <h2 id="orderTitle">Как задать порядок?</h2>
+          <p>Выберите один способ. TXT и Excel не смешиваются в одной сборке.</p>
+        </div>
+
+        <div id="modeSelector" class="mode-grid">
+          <button id="textModeButton" class="mode-card" type="button" data-mode="text">
+            <span class="mode-icon">☰</span>
+            <strong>Один список</strong>
+            <span>Собрать один PDF по списку номеров</span>
+            <small>Подходит, если у вас TXT или список, который можно вставить вручную.</small>
+          </button>
+          <button id="excelModeButton" class="mode-card" type="button" data-mode="excel">
+            <span class="mode-icon">▦</span>
+            <strong>Таблица Excel</strong>
+            <span>Собрать отдельный PDF для каждого столбца</span>
+            <small>Подходит, если номера распределены по нескольким столбцам XLSX.</small>
+          </button>
+          <button id="registrationModeButton" class="mode-card" type="button" data-mode="registration">
+            <span class="mode-icon">№</span>
+            <strong>Новые партии</strong>
+            <span>Создать партии и нанести номера</span>
+            <small>DOCX будут распределены по партиям, а нумерация продолжится от последнего объекта года.</small>
+          </button>
+        </div>
+
+        <div id="selectedModeBar" class="selected-mode" hidden>
+          <span id="selectedModeText"></span>
+          <button id="changeModeButton" class="link-button" type="button">Изменить способ</button>
+        </div>
+
+        <div id="textModePanel" class="mode-panel" hidden>
+          <div class="panel-head">
+            <div>
+              <h3>Укажите номера в нужном порядке</h3>
+              <p>Один номер в каждой строке. Документы будут собраны сверху вниз.</p>
+            </div>
+            <div class="inline-actions">
+              <label class="file-button secondary">
+                <input id="txtInput" type="file" accept=".txt,text/plain" />
+                Загрузить TXT
+              </label>
+              <button id="clearSequenceButton" class="secondary" type="button">Очистить</button>
+            </div>
+          </div>
+          <label class="field-label" for="sequenceInput">Список номеров</label>
+          <textarea id="sequenceInput" rows="12" spellcheck="false" placeholder="ее5968&#10;ее6032&#10;нн2832"></textarea>
+          <div class="input-footer">
+            <span id="sequenceCount">0 номеров</span>
+            <button id="validateButton" type="button" disabled>Проверить порядок</button>
+          </div>
+        </div>
+
+        <div id="excelModePanel" class="mode-panel" hidden>
+          <div class="panel-head">
+            <div>
+              <h3>Выберите таблицу Excel</h3>
+              <p>Для каждого непустого столбца будет создан отдельный PDF.</p>
+            </div>
+            <label class="file-button">
+              <input id="xlsxInput" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+              Выбрать XLSX
+            </label>
+          </div>
+          <div id="excelFileState" class="empty-state">Excel-файл ещё не выбран.</div>
+          <div class="input-footer">
+            <span id="excelModeHint">После выбора файла можно проверить столбцы.</span>
+            <button id="validateExcelButton" type="button" disabled>Проверить Excel</button>
+          </div>
+        </div>
+
+        <div id="registrationModePanel" class="mode-panel registration-panel" hidden>
+          <div class="panel-head">
+            <div>
+              <h3>Создать партии из загруженных DOCX</h3>
+              <p>Документы будут взяты в порядке загрузки. Для каждого объекта будет создан № рег РЦСМЭ и № постановления, а на PDF нанесётся № постановления.</p>
+            </div>
+            <span id="registrationPermissionNote" class="status-pill warn" hidden>Нужны права user/admin</span>
+          </div>
+          <div class="registration-grid">
+            <label>Стартовая партия
+              <input id="registrationStartPartyInput" type="number" min="1" step="1" placeholder="193" />
+            </label>
+            <label>Год
+              <input id="registrationYearInput" type="number" min="1900" max="2200" step="1" />
+            </label>
+            <label>DOCX в партии
+              <input id="registrationPerPartyInput" type="number" min="1" max="500" step="1" value="100" />
+            </label>
+            <label>Начальный № рег РЦСМЭ
+              <input id="registrationStartRcsmeInput" placeholder="автоматически" />
+            </label>
+            <label>Дата поступления
+              <input id="registrationIntakeDateInput" type="date" />
+            </label>
+            <label>Дата постановления
+              <input id="registrationDecisionDateInput" type="date" />
+            </label>
+            <label>Следователь
+              <input id="registrationInvestigatorInput" />
+            </label>
+            <label>№ вх.
+              <input id="registrationIncomingInput" />
+            </label>
+            <label>Коробка
+              <input id="registrationBoxInput" />
+            </label>
+          </div>
+          <div class="registration-number-list">
+            <div class="panel-head compact">
+              <div>
+                <h3>№ в в/ч №522</h3>
+                <p>Загрузите готовый список или вставьте номера. Список задаёт порядок DOCX, проверяет совпадения и заполняет объекты построчно.</p>
+              </div>
+              <div class="inline-actions">
+                <label class="file-button secondary">
+                  <input id="registrationExternalTxtInput" type="file" accept=".txt,text/plain" />
+                  TXT
+                </label>
+                <label class="file-button secondary">
+                  <input id="registrationExternalXlsxInput" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                  Excel
+                </label>
+                <button id="clearRegistrationExternalButton" class="secondary" type="button">Очистить</button>
+              </div>
+            </div>
+            <textarea id="registrationExternalInput" rows="5" spellcheck="false" placeholder="ии6525&#10;ии6526&#10;ии6527"></textarea>
+            <div class="input-footer">
+              <span id="registrationExternalCount">0 номеров, fallback из имени DOCX</span>
+            </div>
+            <div id="registrationExternalWarnings" class="stamp-warnings"></div>
+          </div>
+          <div class="input-footer">
+            <span id="registrationSummary">Предпросмотр ещё не выполнен</span>
+            <div class="inline-actions">
+              <button id="previewRegistrationButton" class="secondary" type="button">Предпросмотр</button>
+              <button id="applyRegistrationButton" type="button" disabled>Создать и подготовить печать</button>
+            </div>
+          </div>
+          <div id="registrationPreview" class="registration-preview"></div>
+        </div>
+
+        <div id="stampPanel" class="mode-panel stamp-panel" hidden>
+          <label class="toggle-row">
+            <input id="stampEnabledInput" type="checkbox" />
+            <span>
+              <strong id="stampPanelTitle">Нанести номера на документы</strong>
+              <small id="stampPanelSubtitle">Готовые метки будут нанесены построчно, без генерации и сортировки.</small>
+            </span>
+          </label>
+
+          <div id="stampControls" class="stamp-controls" hidden>
+            <div class="panel-head">
+              <div>
+                <h3 id="stampControlsTitle">Номера на документах</h3>
+                <p id="stampControlsSubtitle">Добавьте готовый список в том же порядке, что и документы. Одна строка — один документ.</p>
+              </div>
+              <div id="stampSourceActions" class="inline-actions">
+                <label class="file-button secondary">
+                  <input id="stampTxtInput" type="file" accept=".txt,text/plain" />
+                  Загрузить TXT
+                </label>
+                <label class="file-button secondary">
+                  <input id="stampXlsxInput" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                  Загрузить Excel
+                </label>
+                <button id="clearStampButton" class="secondary" type="button">Очистить</button>
+              </div>
+            </div>
+
+            <div id="stampTextBlock">
+              <label class="field-label" for="stampTextInput">Список меток</label>
+              <textarea id="stampTextInput" rows="8" spellcheck="false" placeholder="6528-2026&#10;6529-2026&#10;6531-2026"></textarea>
+            </div>
+
+            <div id="stampExcelGroups" class="stamp-groups" hidden></div>
+
+            <div class="stamp-options">
+              <label id="stampRejectDuplicatesRow"><input id="stampRejectDuplicatesInput" type="checkbox" /> Считать повторяющиеся метки ошибкой</label>
+              <label id="stampAllowSkipRow"><input id="stampAllowSkipInput" type="checkbox" /> Разрешить SKIP</label>
+              <label>
+                Угол
+                <select id="stampCornerInput">
+                  <option value="top_left">Левый верхний</option>
+                  <option value="top_right">Правый верхний</option>
+                  <option value="bottom_left">Левый нижний</option>
+                  <option value="bottom_right">Правый нижний</option>
+                </select>
+              </label>
+              <label>
+                Поворот
+                <select id="stampRotationInput">
+                  <option value="none">Без поворота</option>
+                  <option value="left_90">90° влево</option>
+                </select>
+              </label>
+              <label>Слева, мм <input id="stampMarginXInput" type="number" min="0" max="80" step="1" value="10" /></label>
+              <label>Сверху, мм <input id="stampMarginYInput" type="number" min="0" max="80" step="1" value="8" /></label>
+              <label>Шрифт, pt <input id="stampFontSizeInput" type="number" min="6" max="48" step="1" value="12" /></label>
+              <label><input id="stampBoldInput" type="checkbox" /> Жирный</label>
+              <label><input id="stampBackgroundInput" type="checkbox" /> Белый фон</label>
+              <label><input id="stampBorderInput" type="checkbox" /> Рамка</label>
+            </div>
+
+            <div class="input-footer">
+              <span id="stampSummary">Документов: 0 · Меток: 0</span>
+              <div id="stampValidationActions" class="inline-actions">
+                <button id="applyStampingButton" class="secondary" type="button" disabled>Применить метки</button>
+                <button id="stampPreviewButton" class="secondary" type="button" disabled>Показать пример</button>
+              </div>
+            </div>
+            <div id="stampWarnings" class="issue-groups"></div>
+            <figure id="stampPreviewFigure" class="stamp-preview" hidden>
+              <img id="stampPreviewImage" alt="Пример нанесения метки" />
+              <figcaption id="stampPreviewCaption"></figcaption>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <section id="checkScreen" class="screen" aria-labelledby="checkTitle" hidden>
+        <div class="screen-head">
+          <p class="eyebrow">Шаг 3 из 4</p>
+          <h2 id="checkTitle">Можно собирать PDF?</h2>
+          <p id="checkSubtitle">После проверки здесь появятся найденные документы и ошибки.</p>
+        </div>
+
+        <div id="validationSummary" class="validation-summary"></div>
+        <div id="warningGroups" class="issue-groups"></div>
+
+        <div id="resultTools" class="result-tools" hidden>
+          <div id="filterButtons" class="filter-row" role="group" aria-label="Фильтр строк проверки"></div>
+          <label class="search-box">
+            <span>Поиск</span>
+            <input id="resultSearch" type="search" autocomplete="off" placeholder="Номер или имя файла" />
+          </label>
+        </div>
+
+        <div id="resultsArea" class="results-area"></div>
+        <div class="primary-row">
+          <button id="buildButton" type="button" disabled>Собрать PDF</button>
+        </div>
+      </section>
+
+      <section id="resultScreen" class="screen" aria-labelledby="resultTitle" hidden>
+        <div id="progressPanel" class="progress-panel" hidden>
+          <p class="eyebrow">Шаг 4 из 4</p>
+          <h2>Собираем PDF</h2>
+          <p>Можно закрыть вкладку — обработка продолжится.</p>
+          <div class="progress-meter" aria-hidden="true">
+            <div id="progressBar"></div>
+          </div>
+          <div id="progressText" class="progress-text" aria-live="polite">Запускаем сборку…</div>
+          <div id="progressDetails" class="progress-details"></div>
+          <ol class="process-steps" aria-label="Этапы сборки">
+            <li class="done">Проверка файлов</li>
+            <li class="active">Преобразование документов</li>
+            <li>Сборка итогового PDF</li>
+            <li>Подготовка скачивания</li>
+          </ol>
+        </div>
+
+        <div id="resultPanel" class="result-panel" hidden>
+          <p class="eyebrow">Шаг 4 из 4</p>
+          <h2 id="resultTitle">PDF готов</h2>
+          <div id="resultMetrics" class="result-metrics"></div>
+          <div id="resultBlock" class="download-panel"></div>
+          <div id="partsList" class="parts-list"></div>
+          <article class="print-advice">
+            <span aria-hidden="true">⎙</span>
+            <div>
+              <h3>Как печатать без изменения размера</h3>
+              <p>В окне печати выберите «Фактический размер» или «100%». Не выбирайте «Подогнать».</p>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+    <dialog id="confirmDialog" class="modal">
+      <form method="dialog">
+        <h2 id="confirmTitle">Подтвердите действие</h2>
+        <p id="confirmText"></p>
+        <div class="modal-actions">
+          <button id="confirmCancelButton" class="secondary" value="cancel" type="submit">Отмена</button>
+          <button id="confirmOkButton" value="ok" type="submit">Продолжить</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="detailsDialog" class="modal">
+      <form method="dialog">
+        <h2>Задание</h2>
+        <div id="taskDetails" class="details-grid"></div>
+        <div class="modal-actions">
+          <button class="secondary" value="close" type="submit">Закрыть</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="filesDialog" class="modal wide-modal">
+      <form method="dialog">
+        <h2>Загруженные документы</h2>
+        <div id="filesList" class="files-list"></div>
+        <div class="modal-actions">
+          <button class="secondary" value="close" type="submit">Закрыть</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="/print/static/app.js?v=20260802-registration-stamp-style"></script>
+  </body>
+</html>
