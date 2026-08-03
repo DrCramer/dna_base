@@ -4,6 +4,7 @@ import type { KeyboardEvent } from 'react'
 import { useState } from 'react'
 import { api } from '../api/client'
 import type { Employee, ReferenceItem, User } from '../api/types'
+import { EmptyState, ErrorState, LoadingState, PageHeader } from '../components/ui'
 
 const categories = [
   ['extraction_method', 'Выделение_наборы'],
@@ -48,10 +49,11 @@ export function EmployeesPage({ user }: { user: User }) {
   const [referenceError, setReferenceError] = useState<string | null>(null)
   const [showInactiveEmployees, setShowInactiveEmployees] = useState(false)
   const [showInactiveReferences, setShowInactiveReferences] = useState(false)
+  const [roleFilter, setRoleFilter] = useState('all')
   const canEdit = user.role !== 'viewer'
   const employees = useQuery({
-    queryKey: ['employees', q, showInactiveEmployees],
-    queryFn: () => api.employees(q, undefined, undefined, undefined, showInactiveEmployees),
+    queryKey: ['employees', q, roleFilter, showInactiveEmployees],
+    queryFn: () => api.employees(q, undefined, undefined, roleFilter === 'all' ? undefined : roleFilter, showInactiveEmployees),
     staleTime: 30_000
   })
   const references = useQuery({
@@ -135,18 +137,28 @@ export function EmployeesPage({ user }: { user: User }) {
   }
   return (
     <div className="page">
-      <header className="page-header">
-        <h1>Справочники</h1>
-      </header>
+      <PageHeader
+        title="Справочники"
+        description="Сотрудники, роли по этапам и справочные значения, которые используются в таблицах и массовом заполнении."
+      />
       <div className="tabs">
         <button className={tab === 'employees' ? 'active' : ''} onClick={() => setTab('employees')}>Сотрудники</button>
         <button className={tab === 'references' ? 'active' : ''} onClick={() => setTab('references')}>Реактивы / значения</button>
       </div>
       {tab === 'employees' ? (
         <section className="section">
-          <h2>Сотрудники</h2>
+          <div className="section-head">
+            <div>
+              <h2>Сотрудники</h2>
+              <p>{employees.data?.length ?? 0} в текущем списке</p>
+            </div>
+          </div>
           <div className="toolbar">
             <div className="searchbox"><Search size={18} /><input value={q} onChange={(event) => setQ(event.target.value)} placeholder="Поиск сотрудника" /></div>
+            <select className="compact-select" value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>
+              <option value="all">Все роли</option>
+              {employeeRoles.map((item) => <option value={item} key={item}>{item}</option>)}
+            </select>
             <label className="inline-check">
               <input type="checkbox" checked={showInactiveEmployees} onChange={(event) => setShowInactiveEmployees(event.target.checked)} />
               <span>Показать отключённых</span>
@@ -171,6 +183,8 @@ export function EmployeesPage({ user }: { user: User }) {
             </div>
           )}
           {employeeError && <div className="alert danger">{employeeError}</div>}
+          {employees.isLoading && <LoadingState title="Загрузка сотрудников..." rows={4} />}
+          {employees.isError && <ErrorState error={employees.error} onRetry={() => employees.refetch()} />}
           <div className="employee-table-wrap">
             <table className="employee-table">
               <thead>
@@ -183,7 +197,7 @@ export function EmployeesPage({ user }: { user: User }) {
                 </tr>
               </thead>
               <tbody>
-                {(employees.data ?? []).map((employee) => {
+                {!employees.isLoading && (employees.data ?? []).map((employee) => {
                   const busy = employeeBusy(employee)
                   return (
                     <tr key={employee.id} className={`${busy ? 'is-busy' : ''} ${!employee.is_active ? 'is-inactive' : ''}`}>
@@ -241,7 +255,9 @@ export function EmployeesPage({ user }: { user: User }) {
                 })}
               </tbody>
             </table>
-            {!employees.data?.length && <div className="empty">Нет сотрудников</div>}
+            {!employees.isLoading && !employees.data?.length && (
+              <EmptyState title="Сотрудники не найдены">Измените поиск, роль или фильтр активности.</EmptyState>
+            )}
           </div>
         </section>
       ) : (
@@ -266,6 +282,8 @@ export function EmployeesPage({ user }: { user: User }) {
             </div>
           )}
           {referenceError && <div className="alert danger">{referenceError}</div>}
+          {references.isLoading && <LoadingState title="Загрузка справочника..." rows={4} />}
+          {references.isError && <ErrorState error={references.error} onRetry={() => references.refetch()} />}
           <div className="reference-table-wrap">
             <table className="reference-table">
               <thead>
@@ -278,7 +296,7 @@ export function EmployeesPage({ user }: { user: User }) {
                 </tr>
               </thead>
               <tbody>
-                {(references.data ?? []).map((item) => {
+                {!references.isLoading && (references.data ?? []).map((item) => {
                   const busy = referenceBusy(item)
                   return (
                     <tr key={item.id} className={`${busy ? 'is-busy' : ''} ${!item.is_active ? 'is-inactive' : ''}`}>
@@ -332,7 +350,9 @@ export function EmployeesPage({ user }: { user: User }) {
                 })}
               </tbody>
             </table>
-            {!references.data?.length && <div className="empty">Нет значений</div>}
+            {!references.isLoading && !references.data?.length && (
+              <EmptyState title="Значения не найдены">Проверьте категорию, поиск или фильтр отключённых значений.</EmptyState>
+            )}
           </div>
         </section>
       )}

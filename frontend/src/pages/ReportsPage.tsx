@@ -37,6 +37,13 @@ const kpiLabels: Record<string, string> = {
   objects_burnt_bone: 'Объектов "Горелая кость"'
 }
 
+const kpiGroups = [
+  ['Общее', ['active_parties', 'total_objects', 'objects_in_work']],
+  ['Этапы', ['objects_without_sample_prep', 'objects_without_extraction', 'objects_without_realtime', 'objects_without_pcr', 'objects_without_electrophoresis', 'objects_without_analysis']],
+  ['Проблемы', ['problem_parties', 'parties_without_control', 'objects_no_object', 'objects_no_decree', 'objects_no_biomaterial', 'objects_with_repeat_stages']],
+  ['Материал', ['objects_burnt_bone']]
+] as const
+
 const controlColumns = [
   ['control_actual_decrees', 'Фактическое количество постановлений'],
   ['control_decree_without_object', 'Есть постановление, но нет объекта'],
@@ -102,6 +109,7 @@ export function ReportsPage({ user, onPartyOpen }: { user: User; onPartyOpen: (p
   const [tab, setTab] = useState<ReportsTab>(initial.tab)
   const [statsMode, setStatsMode] = useState<StatsMode>(initial.stats)
   const [filters, setFilters] = useState(initial)
+  const [filtersExpanded, setFiltersExpanded] = useState(false)
   const partyYears = useQuery({ queryKey: ['parties', 'years'], queryFn: api.partyYears, staleTime: 300_000 })
   const parties = useQuery({
     queryKey: ['reports', 'parties-filter', filters.case_year, filters.include_archived],
@@ -219,51 +227,58 @@ export function ReportsPage({ user, onPartyOpen }: { user: User; onPartyOpen: (p
               <option value="custom">Произвольный диапазон</option>
             </select>
           </label>
-          <label>С даты
-            <input type="date" value={filters.date_from} onChange={(event) => updateFilter('date_from', event.target.value)} />
-          </label>
-          <label>По дату
-            <input type="date" value={filters.date_to} onChange={(event) => updateFilter('date_to', event.target.value)} />
-          </label>
-          <label>Партии
-            <select
-              multiple
-              value={Array.from(selectedPartyIds).map(String)}
-              onChange={(event) => {
-                const values = Array.from(event.currentTarget.selectedOptions).map((option) => option.value)
-                updateFilter('party_ids', values.join(','))
-              }}
-            >
-              {(parties.data?.items ?? []).map((party) => (
-                <option key={party.id} value={party.id}>№ {party.party_no} · {party.object_count}</option>
-              ))}
-            </select>
-          </label>
-          <label>Этап
-            <select value={filters.stage_type} onChange={(event) => updateFilter('stage_type', event.target.value)}>
-              <option value="">Все этапы</option>
-              {stageColumns.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-            </select>
-          </label>
-          <label>Исполнитель
-            <select value={filters.employee_id} onChange={(event) => updateFilter('employee_id', event.target.value)}>
-              <option value="">Все сотрудники</option>
-              {(employees.data ?? []).map((employee) => <option key={employee.id} value={employee.id}>{employee.full_name}</option>)}
-            </select>
-          </label>
-          <label>Тип объекта
-            <input value={filters.object_type} onChange={(event) => updateFilter('object_type', event.target.value)} placeholder="кость, зуб..." />
-          </label>
-          <label>Коробка
-            <input value={filters.box_no} onChange={(event) => updateFilter('box_no', event.target.value)} placeholder="номер коробки" />
-          </label>
+          <label className="checkbox-inline report-primary-check"><input type="checkbox" checked={filters.only_problematic} onChange={(event) => updateFilter('only_problematic', event.target.checked)} /> Только проблемные</label>
+          <button className="icon-button" onClick={resetFilters}><FilterX size={18} />Сбросить</button>
+          <button className="icon-button" onClick={() => setFiltersExpanded((value) => !value)}>
+            {filtersExpanded ? 'Свернуть фильтры' : 'Развернуть фильтры'}
+          </button>
+          {filtersExpanded && (
+            <>
+              <label>С даты
+                <input type="date" value={filters.date_from} onChange={(event) => updateFilter('date_from', event.target.value)} />
+              </label>
+              <label>По дату
+                <input type="date" value={filters.date_to} onChange={(event) => updateFilter('date_to', event.target.value)} />
+              </label>
+              <label>Партии
+                <select
+                  multiple
+                  value={Array.from(selectedPartyIds).map(String)}
+                  onChange={(event) => {
+                    const values = Array.from(event.currentTarget.selectedOptions).map((option) => option.value)
+                    updateFilter('party_ids', values.join(','))
+                  }}
+                >
+                  {(parties.data?.items ?? []).map((party) => (
+                    <option key={party.id} value={party.id}>№ {party.party_no} · {party.object_count}</option>
+                  ))}
+                </select>
+              </label>
+              <label>Этап
+                <select value={filters.stage_type} onChange={(event) => updateFilter('stage_type', event.target.value)}>
+                  <option value="">Все этапы</option>
+                  {stageColumns.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                </select>
+              </label>
+              <label>Исполнитель
+                <select value={filters.employee_id} onChange={(event) => updateFilter('employee_id', event.target.value)}>
+                  <option value="">Все сотрудники</option>
+                  {(employees.data ?? []).map((employee) => <option key={employee.id} value={employee.id}>{employee.full_name}</option>)}
+                </select>
+              </label>
+              <label>Тип объекта
+                <input value={filters.object_type} onChange={(event) => updateFilter('object_type', event.target.value)} placeholder="кость, зуб..." />
+              </label>
+              <label>Коробка
+                <input value={filters.box_no} onChange={(event) => updateFilter('box_no', event.target.value)} placeholder="номер коробки" />
+              </label>
+            </>
+          )}
         </div>
         <div className="reports-filter-actions">
           <label className="checkbox-inline"><input type="checkbox" checked={!filters.include_archived} onChange={(event) => updateFilter('include_archived', !event.target.checked)} /> Только активные партии</label>
           <label className="checkbox-inline"><input type="checkbox" checked={filters.include_archived} onChange={(event) => updateFilter('include_archived', event.target.checked)} /> Показывать архивные</label>
           <label className="checkbox-inline"><input type="checkbox" checked={filters.include_empty_parties} onChange={(event) => updateFilter('include_empty_parties', event.target.checked)} /> Показывать пустые партии</label>
-          <label className="checkbox-inline"><input type="checkbox" checked={filters.only_problematic} onChange={(event) => updateFilter('only_problematic', event.target.checked)} /> Только проблемные</label>
-          <button className="icon-button" onClick={resetFilters}><FilterX size={18} />Сбросить фильтры</button>
         </div>
       </section>
 
@@ -279,11 +294,18 @@ export function ReportsPage({ user, onPartyOpen }: { user: User; onPartyOpen: (p
         <section className="section">
           {overview.isLoading ? <div className="loading">Загрузка...</div> : (
             <>
-              <div className="report-kpi-grid">
-                {Object.entries(kpiLabels).map(([key, label]) => (
-                  <div className="report-kpi" key={key}>
-                    <span>{label}</span>
-                    <strong>{overview.data?.kpis?.[key] ?? 0}</strong>
+              <div className="report-kpi-groups">
+                {kpiGroups.map(([group, keys]) => (
+                  <div className="report-kpi-group" key={group}>
+                    <h3>{group}</h3>
+                    <div className="report-kpi-grid">
+                      {keys.map((key) => (
+                        <div className="report-kpi" key={key}>
+                          <span>{kpiLabels[key]}</span>
+                          <strong>{overview.data?.kpis?.[key] ?? 0}</strong>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>

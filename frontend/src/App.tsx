@@ -29,6 +29,13 @@ function initialView() {
   return 'dashboard'
 }
 
+function clearReportUrlParams() {
+  if (typeof window === 'undefined') return
+  const params = new URLSearchParams(window.location.search)
+  if (!params.has('report_tab')) return
+  window.history.replaceState(null, '', window.location.pathname)
+}
+
 function systemTheme(): EffectiveTheme {
   if (typeof window === 'undefined') return 'light'
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
@@ -96,6 +103,12 @@ export function App() {
     document.documentElement.style.setProperty('--ui-scale', String(rounded))
   }, [uiScale])
 
+  useEffect(() => {
+    if (view !== 'reports' || objectId !== null) {
+      clearReportUrlParams()
+    }
+  }, [objectId, view])
+
   function changeUiScale(direction: -1 | 1) {
     setUiScale((value) => Math.min(maxUiScale, Math.max(minUiScale, Math.round((value + direction * uiScaleStep) * 10) / 10)))
   }
@@ -111,15 +124,28 @@ export function App() {
     setPartySelect(partyNo)
     setView('parties')
   }, [])
+  const openReports = useCallback((tab = 'overview', extraParams?: Record<string, string | number | boolean | null | undefined>) => {
+    setObjectId(null)
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams()
+      params.set('report_tab', tab)
+      Object.entries(extraParams || {}).forEach(([key, value]) => {
+        if (value === undefined || value === null || value === '') return
+        params.set(key, String(value))
+      })
+      window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`)
+    }
+    setView('reports')
+  }, [])
   if (isLoading) return <div className="loading">Загрузка...</div>
   if (!user) return <LoginPage onLogin={(username, password) => login.mutateAsync({ username, password }).then(() => undefined)} />
-  let page = <DashboardPage onPartyOpen={openParty} />
+  let page = <DashboardPage onPartyOpen={openParty} onReportsOpen={openReports} />
   if (objectId) page = <ObjectDetailPage id={objectId} user={user} onBack={() => setObjectId(null)} onPartyOpen={openParty} />
-  else if (view === 'dashboard') page = <DashboardPage onPartyOpen={openParty} />
-  else if (view === 'parties') page = <PartiesPage user={user} onObjectOpen={setObjectId} initialPartyNo={partySelect} onInitialPartyHandled={() => setPartySelect(null)} />
+  else if (view === 'dashboard') page = <DashboardPage onPartyOpen={openParty} onReportsOpen={openReports} />
+  else if (view === 'parties') page = <PartiesPage user={user} onObjectOpen={setObjectId} onReportsOpen={openReports} initialPartyNo={partySelect} onInitialPartyHandled={() => setPartySelect(null)} />
   else if (view === 'objects') page = <ObjectsPage initialQuery={objectsQuery} partyFilter={partyFilter} onQueryChange={setObjectsQuery} onPartyFilterChange={setPartyFilter} onOpen={setObjectId} onPartyOpen={openParty} />
   else if (view === 'work-sessions') page = <WorkSessionsPage user={user} />
-  else if (view === 'search') page = <SearchPage onObjectOpen={setObjectId} />
+  else if (view === 'search') page = <SearchPage onObjectOpen={setObjectId} onPartyOpen={openPartyInParties} />
   else if (view === 'reports') page = <ReportsPage user={user} onPartyOpen={openPartyInParties} />
   else if (view === 'employees') page = <EmployeesPage user={user} />
   else if (view === 'print') page = <PrintPage />

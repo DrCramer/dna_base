@@ -40,14 +40,18 @@ export function Shell({ user, active, onNavigate, onLogout, theme, themeMode, on
   useEffect(() => {
     if (importViews.includes(active)) setIsImportOpen(true)
   }, [active])
-  const items = [
+  const workItems = [
     { id: 'dashboard', label: 'Главная', icon: Home, visible: true },
     { id: 'parties', label: 'Партии', icon: ClipboardList, visible: true },
     { id: 'objects', label: 'Объекты', icon: Database, visible: true },
     { id: 'work-sessions', label: 'Массовое заполнение', icon: ClipboardList, visible: canEdit },
-    { id: 'search', label: 'Поиск', icon: Search, visible: true },
+    { id: 'search', label: 'Поиск', icon: Search, visible: true }
+  ]
+  const controlItems = [
     { id: 'reports', label: 'Отчёты', icon: BarChart3, visible: true },
-    { id: 'print', label: 'Печать DOCX', icon: Printer, visible: true },
+    { id: 'print', label: 'Печать DOCX', icon: Printer, visible: true }
+  ]
+  const adminItems = [
     { id: 'employees', label: 'Справочники', icon: Users, visible: true }
   ]
   const importItems = [
@@ -87,7 +91,28 @@ export function Shell({ user, active, onNavigate, onLogout, theme, themeMode, on
           </button>
         </div>
         <nav>
-          {items.filter((item) => item.visible).map((item) => {
+          <span className="sidebar-caption">Работа</span>
+          {workItems.filter((item) => item.visible).map((item) => {
+            const Icon = item.icon
+            return (
+              <button key={item.id} className={active === item.id ? 'active' : ''} onClick={() => onNavigate(item.id)} title={item.label}>
+                <Icon size={18} />
+                <span>{item.label}</span>
+              </button>
+            )
+          })}
+          <span className="sidebar-caption">Контроль</span>
+          {controlItems.filter((item) => item.visible).map((item) => {
+            const Icon = item.icon
+            return (
+              <button key={item.id} className={active === item.id ? 'active' : ''} onClick={() => onNavigate(item.id)} title={item.label}>
+                <Icon size={18} />
+                <span>{item.label}</span>
+              </button>
+            )
+          })}
+          <span className="sidebar-caption">Администрирование</span>
+          {adminItems.filter((item) => item.visible).map((item) => {
             const Icon = item.icon
             return (
               <button key={item.id} className={active === item.id ? 'active' : ''} onClick={() => onNavigate(item.id)} title={item.label}>

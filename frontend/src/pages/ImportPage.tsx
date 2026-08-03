@@ -3,6 +3,7 @@ import { Check, Search, Upload, X } from 'lucide-react'
 import { Fragment, useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { CommitResponse, ElectrophoresisPdfPreview, Party, RegistryPreview, RtCommitResponse, RtPreview } from '../api/types'
+import { PageHeader } from '../components/ui'
 
 type RegistryImportStatus = 'pending' | 'previewing' | 'ready' | 'blocked' | 'committing' | 'done' | 'error'
 type RegistryImportPhase = 'idle' | 'previewing' | 'committing' | 'done'
@@ -95,6 +96,93 @@ const emptyRtRun: RtImportRun = {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Не удалось выполнить операцию'
+}
+
+function ImportIntro({
+  title,
+  description,
+  formats,
+  steps,
+  warnings
+}: {
+  title: string
+  description: string
+  formats: string[]
+  steps: string[]
+  warnings: string[]
+}) {
+  return (
+    <section className="section import-intro">
+      <div className="section-head">
+        <div>
+          <h2>{title}</h2>
+          <p>{description}</p>
+        </div>
+      </div>
+      <div className="import-help-grid">
+        <div className="import-help-card">
+          <strong>Форматы</strong>
+          <p>{formats.join(', ')}</p>
+        </div>
+        <div className="import-help-card">
+          <strong>После загрузки</strong>
+          <ul>{steps.map((item) => <li key={item}>{item}</li>)}</ul>
+        </div>
+        <div className="import-help-card">
+          <strong>Частые проверки</strong>
+          <ul>{warnings.map((item) => <li key={item}>{item}</li>)}</ul>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function formatImportDate(value: string | null | undefined) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+function RecentImports() {
+  const latest = useQuery({ queryKey: ['dashboard', 'latest-imports'], queryFn: api.dashboard, staleTime: 60_000 })
+  const rows = latest.data?.latest_imports ?? []
+  return (
+    <section className="section recent-imports-section">
+      <div className="section-head">
+        <div>
+          <h2>Последние импорты</h2>
+          <p>Короткая история последних загруженных файлов.</p>
+        </div>
+      </div>
+      {latest.isLoading ? (
+        <div className="mini-table">
+          {Array.from({ length: 3 }, (_, index) => <div key={index}><span>Загрузка...</span><span>—</span><span>—</span></div>)}
+        </div>
+      ) : rows.length ? (
+        <div className="recent-imports-table">
+          <div className="recent-imports-row recent-imports-head">
+            <span>Дата</span>
+            <span>Файл</span>
+            <span>Партия</span>
+            <span>Найдено</span>
+            <span>Статус</span>
+          </div>
+          {rows.slice(0, 6).map((row) => (
+            <div className="recent-imports-row" key={row.id}>
+              <span>{formatImportDate(row.imported_at)}</span>
+              <strong title={row.filename}>{row.filename}</strong>
+              <span>{row.party_no || '—'}</span>
+              <span>{row.rows_imported}</span>
+              <span className="status-pill success">импортирован</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="empty">Истории импортов пока нет</div>
+      )}
+    </section>
+  )
 }
 
 function fileFingerprint(file: File) {
@@ -362,7 +450,17 @@ export function RegistryImportPage() {
 
   return (
     <div className="page">
-      <header className="page-header"><h1>Импорт реестра</h1></header>
+      <PageHeader
+        title="Импорт реестра"
+        description="Загрузите один или несколько Excel-реестров. Система покажет партии, объекты, этапы, дубликаты и предупреждения перед импортом."
+      />
+      <ImportIntro
+        title="Как работает импорт"
+        description="Новые реестры добавляются пакетно, а повторные требуют явного выбора замены существующих данных."
+        formats={['.xlsx', '.xls']}
+        steps={['preview файла', 'проверка дублей и партий', 'импорт доступных файлов']}
+        warnings={['дубликаты внутри файла блокируются', 'объекты из другой партии не переносятся', 'замена затрагивает только registry_excel']}
+      />
       <section className="upload-panel">
         <label className="file-drop">
           <Upload size={22} />
@@ -379,6 +477,7 @@ export function RegistryImportPage() {
         </label>
         {notice && <div className="alert">{notice}</div>}
       </section>
+      <RecentImports />
       {items.length > 0 && (
         <section className="section">
           <div className="party-main-head">
@@ -702,7 +801,17 @@ export function RtImportPage() {
 
   return (
     <div className="page">
-      <header className="page-header"><h1>Импорт RT / qPCR</h1></header>
+      <PageHeader
+        title="Импорт RT / qPCR"
+        description="Загрузите файлы RealTime/qPCR. Система сопоставит результаты с объектами по № рег РЦСМЭ, постановлениям и repeat-номерам."
+      />
+      <ImportIntro
+        title="Правила сопоставления"
+        description="Повторные образцы с *, x или х создают отдельные repeat-строки и не затирают основной объект."
+        formats={['.xlsx', '.xls']}
+        steps={['preview по каждому файлу', 'выбор исполнителя RT', 'замена или новая попытка при повторном импорте']}
+        warnings={['без выбора режима старые RT-данные не перезаписываются', 'не найденные номера остаются в отчёте', 'пакет импортируется последовательно']}
+      />
       <section className="upload-panel">
         <label className="file-drop">
           <Upload size={22} />
@@ -719,6 +828,7 @@ export function RtImportPage() {
         </label>
         {notice && <div className="alert">{notice}</div>}
       </section>
+      <RecentImports />
       {items.length > 0 && (
         <section className="section">
           <div className="party-main-head">
@@ -1102,7 +1212,17 @@ export function ElectrophoresisImportPage() {
 
   return (
     <div className="page">
-      <header className="page-header"><h1>Импорт фореза</h1></header>
+      <PageHeader
+        title="Импорт фореза"
+        description="Загрузите PDF-файлы электрофореза. Для контрольных PDF выберите партии, к которым нужно привязать К+, К-, PC или NC."
+      />
+      <ImportIntro
+        title="PDF фореза"
+        description="Обычные файлы привязываются по имени PDF, контрольные файлы сохраняются как строки контролей на этапе Анализ."
+        formats={['.pdf']}
+        steps={['выбор года для сопоставления', 'preview обычных PDF и контролей', 'сохранение с датой и исполнителем анализа']}
+        warnings={['для контролей можно выбрать несколько партий', 'повторы x/х/* привязываются к repeat-объектам', 'существующие PDF требуют replace или append']}
+      />
       <section className="upload-panel">
         <div className="rt-import-actions electrophoresis-import-actions">
           <label>Год для сопоставления объектов
@@ -1141,6 +1261,7 @@ export function ElectrophoresisImportPage() {
           />
         </label>
       </section>
+      <RecentImports />
       {previewProgress && (
         <section className="section">
           <div className="import-progress-panel">

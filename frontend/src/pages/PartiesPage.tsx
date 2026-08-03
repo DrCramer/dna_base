@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Archive, Check, ChevronDown, ChevronRight, ClipboardList, Columns3, Copy, Eye, FileDown, Filter, History, Plus, Printer, Save, Search, X } from 'lucide-react'
+import { Archive, BarChart3, Check, ChevronDown, ChevronRight, ClipboardList, Columns3, Copy, Eye, FileDown, Filter, History, Plus, Printer, Save, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type { Employee, Party, ReferenceItem, RegistrationBulkRequest, RegistrationBulkRow, RegistryObject, StageTable, StageTableColumn, StageTableEvent, StageTableRow, User } from '../api/types'
@@ -652,6 +652,29 @@ function StageGrid({
   const stageEmployees = useMemo(() => employeesForStage(employees, activeStage), [activeStage, employees])
   const gridTemplateColumns = `44px ${columns.map(stageColumnTrack).join(' ')}${showActionsColumn ? ' 130px' : ''}`
   const rowStyle = { gridTemplateColumns }
+  const stickyLeftByKey = useMemo(() => {
+    const stickyKeys = new Set(['registry_row_no', 'rcsme_reg_no', 'external_military_no'])
+    const result: Record<string, number> = {}
+    let left = 44
+    let contiguous = true
+    for (const column of columns) {
+      if (!contiguous || !stickyKeys.has(column.key)) {
+        contiguous = false
+        continue
+      }
+      result[column.key] = left
+      left += Number.parseInt(stageColumnTrack(column), 10) || 0
+    }
+    return result
+  }, [columns])
+  function stickyCellClass(column: StageTableColumn) {
+    const left = stickyLeftByKey[column.key]
+    return left === undefined ? '' : 'stage-sticky-cell'
+  }
+  function stickyCellStyle(column: StageTableColumn) {
+    const left = stickyLeftByKey[column.key]
+    return left === undefined ? undefined : { left }
+  }
   const filterValues = useMemo(() => {
     if (!filterColumn) return []
     return Array.from(new Set(allRows.map((row) => columnFilterValue(row, filterColumn)))).sort((a, b) => a.localeCompare(b, 'ru'))
@@ -672,7 +695,7 @@ function StageGrid({
     <div className="stage-grid-wrap">
       <div className="stage-grid" role="table" style={{ gridTemplateColumns }}>
         <div className="stage-grid-row stage-grid-head" role="row" style={rowStyle}>
-          <div role="columnheader">
+          <div className="stage-sticky-cell stage-select-sticky" style={{ left: 0 }} role="columnheader">
             <input
               type="checkbox"
               checked={selectableRows.length > 0 && selectableRows.every((row) => selectedIds.has(row.object.id))}
@@ -682,7 +705,7 @@ function StageGrid({
             />
           </div>
           {columns.map((column) => (
-            <div role="columnheader" key={column.key}>
+            <div className={stickyCellClass(column)} style={stickyCellStyle(column)} role="columnheader" key={column.key}>
               <button
                 type="button"
                 className={`stage-filter-button ${Object.prototype.hasOwnProperty.call(columnFilters, column.key) ? 'active' : ''}`}
@@ -712,7 +735,7 @@ function StageGrid({
               key={rowKey}
               style={rowStyle}
             >
-              <div role="cell">
+              <div className="stage-sticky-cell stage-select-sticky" style={{ left: 0 }} role="cell">
                 <input
                   type="checkbox"
                   checked={!controlRow && !blockedNoObjectRow && selectedIds.has(row.object.id)}
@@ -732,7 +755,12 @@ function StageGrid({
                 const noDecreeControlChecked = externalMilitaryNo ? registrationNoDecreeNumbers.has(normalizeControlNo(externalMilitaryNo)) : false
                 const registrationActiveChecked = registrationActiveIds.has(row.object.id)
                 return (
-                  <div className={`${hasDraft ? 'dirty-cell' : ''}${activeStage === 'realtime' && realtimeQuantityKeys.has(column.key) && value === 'n/a' ? ' rt-na-cell' : ''}${activeStage === 'registration' && column.key === 'external_military_no' && registrationActiveChecked ? ' registration-active-number-cell' : ''}`} role="cell" key={column.key}>
+                  <div
+                    style={stickyCellStyle(column)}
+                    className={`${stickyCellClass(column)}${hasDraft ? ' dirty-cell' : ''}${activeStage === 'realtime' && realtimeQuantityKeys.has(column.key) && value === 'n/a' ? ' rt-na-cell' : ''}${activeStage === 'registration' && column.key === 'external_military_no' && registrationActiveChecked ? ' registration-active-number-cell' : ''}`}
+                    role="cell"
+                    key={column.key}
+                  >
                     {activeStage === 'registration' && column.key === 'no_object' ? (
                       <label
                         className="no-object-checkbox"
@@ -942,11 +970,13 @@ function StageGrid({
 export function PartiesPage({
   user,
   onObjectOpen,
+  onReportsOpen,
   initialPartyNo,
   onInitialPartyHandled
 }: {
   user: User
   onObjectOpen: (id: number) => void
+  onReportsOpen?: (tab?: string, params?: Record<string, string | number | boolean | null | undefined>) => void
   initialPartyNo?: string | null
   onInitialPartyHandled?: () => void
 }) {
@@ -1137,6 +1167,14 @@ export function PartiesPage({
   const printReady = printPreparedStages.length > 0 && printPreparedStages.every(({ stage }) => (printColumnKeys[stage] || []).length > 0)
   const hasControlDrafts = Boolean(activeParty) && partyControlFields.some(([key]) => String(activeParty?.[key] || '') !== controlDraft[key])
   const filledControlCount = activeParty ? partyControlFields.filter(([key]) => controlDraft[key].trim()).length : 0
+  const readinessPercent = useMemo(() => {
+    const counts = progress.data?.stage_counts ?? {}
+    const trackedStages = printableStageTabs.filter(([stage]) => stage !== 'registration').map(([stage]) => canonicalStageKey(stage))
+    const totalSlots = partyObjectCount * trackedStages.length
+    if (!totalSlots) return 0
+    const done = trackedStages.reduce((sum, stage) => sum + Math.min(counts[stage] ?? 0, partyObjectCount), 0)
+    return Math.round((done / totalSlots) * 100)
+  }, [partyObjectCount, progress.data?.stage_counts])
   const registrationNoObjectNumbers = useMemo(
     () => new Set(splitControlNumbers(controlDraft.control_decree_without_object).map(normalizeControlNo)),
     [controlDraft.control_decree_without_object]
@@ -2002,11 +2040,17 @@ export function PartiesPage({
               <div className="party-main-head">
                 <div>
                   <h2>Партия {activeParty.party_no} — {partyObjectCount} {objectWord(partyObjectCount)}</h2>
-                  <span>{statusLabels[activeParty.status] || activeParty.status}{stageTable.isFetching ? ' · обновление...' : ''}</span>
+                  <div className="party-head-summary">
+                    <span>{statusLabels[activeParty.status] || activeParty.status}{stageTable.isFetching ? ' · обновление...' : ''}</span>
+                    <strong>Готовность: {readinessPercent}%</strong>
+                    <strong>Контроль: {filledControlCount}/{partyControlFields.length}</strong>
+                  </div>
                 </div>
                 <div className="toolbar-actions party-main-actions">
                   {canEdit && <button className="icon-button danger" disabled={archiveDisabled} onClick={() => setArchiveOpen(true)}><Archive size={18} />Удалить партию</button>}
                   {canDeletePermanently && <button className="icon-button danger" onClick={() => setPermanentDeleteOpen(true)}><Archive size={18} />Удалить окончательно</button>}
+                  <button className="icon-button" disabled={!printTargetObjectIds.length} onClick={() => openPrintDialog()}><Printer size={18} />Печать</button>
+                  <button className="icon-button" disabled={!onReportsOpen} onClick={() => onReportsOpen?.('overview', { party_ids: activeParty.id, case_year: activeParty.case_year })}><BarChart3 size={18} />Отчёт по партии</button>
                   <a className="icon-button" href={api.exportRegistryUrl(objectQuery, activeParty.party_no, activeParty.case_year)} title="Экспорт"><FileDown size={18} />Экспорт</a>
                   {stageCanFill && <button className="primary compact" onClick={() => openMassFill()}><ClipboardList size={18} />Массовое заполнение</button>}
                   {canEdit && <button className="icon-button" onClick={() => setAddObjectOpen(true)}><Plus size={18} />Добавить объект</button>}
@@ -2084,7 +2128,6 @@ export function PartiesPage({
                   </button>
                 )}
                 <button className="icon-button" disabled={!filteredRows.length} onClick={() => copyVisibleNumbers()}><Copy size={18} />Скопировать номера</button>
-                <button className="icon-button" disabled={!printTargetObjectIds.length} onClick={() => openPrintDialog()}><Printer size={18} />Печать</button>
                 <span>{stageTable.isFetching ? 'Обновление...' : `${filteredObjectCount} ${objectWord(filteredObjectCount)}`}</span>
                 {selectedRows.size > 0 && <strong>{selectedRows.size} выбрано</strong>}
                 {copyMessage && <strong>{copyMessage}</strong>}

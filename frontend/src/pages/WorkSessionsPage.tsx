@@ -3,11 +3,13 @@ import { Check, Eye, Search, Upload, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import type { Employee, ReferenceItem, RegistrationListPreview, StageEventsPreviewRequest, StageTableRow, User, WorkProtocolObjectRow, WorkProtocolPlateCell, WorkProtocolPreview, WorkProtocolStageBlock } from '../api/types'
+import { PageHeader } from '../components/ui'
 
 type DraftValue = string | number | string[] | null
 type StageFieldConfig = { key: string; label: string; type?: string; performerRole?: string }
 type ProtocolBlockDraft = WorkProtocolStageBlock & { enabled: boolean; performerText: string }
 type RegistrationListDuplicateMode = 'block' | 'update_empty_or_existing'
+type WorkSessionsMode = 'manual' | 'registration-list' | 'protocol'
 
 const stages = [
   ['preparation', 'Пробоподготовка'],
@@ -327,6 +329,7 @@ function ProtocolPlatePreview({ cells, objects }: { cells: WorkProtocolPlateCell
 export function WorkSessionsPage({ user }: { user: User }) {
   const queryClient = useQueryClient()
   const canEdit = user.role !== 'viewer'
+  const [mode, setMode] = useState<WorkSessionsMode>('manual')
   const [partySearch, setPartySearch] = useState('')
   const [partyIds, setPartyIds] = useState<number[]>([])
   const [stageType, setStageType] = useState('extraction')
@@ -652,11 +655,17 @@ export function WorkSessionsPage({ user }: { user: User }) {
 
   return (
     <div className="page">
-      <header className="page-header">
-        <h1>Массовое заполнение</h1>
-      </header>
+      <PageHeader
+        title="Массовое заполнение"
+        description="Заполняйте выбранные этапы по нескольким партиям, импортируйте общий список или применяйте протокол плашки после проверки."
+      />
+      <div className="tabs mode-tabs">
+        <button className={mode === 'manual' ? 'active' : ''} onClick={() => setMode('manual')}>Заполнить этап вручную</button>
+        <button className={mode === 'registration-list' ? 'active' : ''} onClick={() => setMode('registration-list')}>Импорт общего списка</button>
+        <button className={mode === 'protocol' ? 'active' : ''} onClick={() => setMode('protocol')}>Импорт протокола плашки</button>
+      </div>
 
-      <section className="section registration-list-import">
+      {mode === 'registration-list' && <section className="section registration-list-import">
         <h2>Импорт общего списка</h2>
         <div className="registration-list-layout">
           <label className="file-drop registration-list-drop">
@@ -834,9 +843,9 @@ export function WorkSessionsPage({ user }: { user: User }) {
             )}
           </div>
         )}
-      </section>
+      </section>}
 
-      <section className="section">
+      {mode === 'protocol' && <section className="section">
         <h2>Импорт протокола плашки</h2>
         <label className="file-drop">
           <Upload size={22} />
@@ -882,9 +891,9 @@ export function WorkSessionsPage({ user }: { user: User }) {
             {applyProtocol.error && <div className="alert error">{errorMessage(applyProtocol.error)}</div>}
           </div>
         )}
-      </section>
+      </section>}
 
-      <div className="split-layout">
+      {mode === 'manual' && <div className="split-layout">
         <section className="section">
           <h2>Партии и объекты</h2>
           <div className="searchbox"><Search size={18} /><input value={partySearch} onChange={(event) => setPartySearch(event.target.value)} placeholder="Поиск партии" /></div>
@@ -969,9 +978,9 @@ export function WorkSessionsPage({ user }: { user: User }) {
           {message && <div className="alert success">{message}</div>}
           {(preview.error || apply.error) && <div className="alert error">{errorMessage(preview.error || apply.error)}</div>}
         </section>
-      </div>
+      </div>}
 
-      <section className="section">
+      {mode === 'manual' && <section className="section">
         <h2>Объекты выбранных партий</h2>
         <div className="mass-object-table">
           <div className="mass-object-row mass-object-head">
@@ -991,7 +1000,7 @@ export function WorkSessionsPage({ user }: { user: User }) {
           ))}
           {!rows.length && <div className="empty">{partyIds.length ? 'Объекты не найдены' : 'Выберите партии'}</div>}
         </div>
-      </section>
+      </section>}
     </div>
   )
 }
