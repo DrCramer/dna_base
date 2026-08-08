@@ -31,7 +31,7 @@
 ## Быстрый запуск
 
 ```bash
-git clone git@github.com:DrCramer/dna_base.git
+git clone https://github.com/DrCramer/dna_base.git
 cd dna_base
 cp .env.example .env
 docker compose up -d --build
@@ -81,7 +81,7 @@ APP_PORT=4010
 ## Запуск на сервере
 
 ```bash
-git clone git@github.com:DrCramer/dna_base.git
+git clone https://github.com/DrCramer/dna_base.git
 cd dna_base
 cp .env.example .env
 nano .env
