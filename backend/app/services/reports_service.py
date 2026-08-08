@@ -13,7 +13,7 @@ from sqlalchemy import Integer, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ElectrophoresisControlFile, ElectrophoresisResultFile, Party, RegistryObject, StageEvent, StageEventPerformer
-from app.services.no_object import control_no_tokens, has_no_object_marker
+from app.services.no_object import control_no_tokens, control_token_matches_object, has_no_object_marker
 
 
 LAB_STAGES = ["sample_prep", "milling", "dna_extraction", "realtime", "pcr", "electrophoresis", "analysis"]
@@ -246,30 +246,25 @@ async def _party_object_flags(session: AsyncSession, parties: list[Party], filte
         return {}
     no_object_by_party = {party.id: control_no_tokens(party.control_decree_without_object) for party in parties}
     no_decree_by_party = {party.id: control_no_tokens(party.control_object_without_decree) for party in parties}
-    stmt = select(
-            RegistryObject.party_id,
-            RegistryObject.object_description,
-            RegistryObject.external_military_no,
-            RegistryObject.decree_no,
-        ).where(RegistryObject.party_id.in_(party_ids), RegistryObject.status != "archived")
+    stmt = select(RegistryObject).where(RegistryObject.party_id.in_(party_ids), RegistryObject.status != "archived")
     for condition in _object_filter_conditions(filters):
         stmt = stmt.where(condition)
     result = await session.execute(stmt)
     counters: dict[int, Counter[str]] = defaultdict(Counter)
-    for party_id, description, external_no, decree_no in result.all():
-        if party_id is None:
+    for obj in result.scalars().all():
+        if obj.party_id is None:
             continue
-        external_token = str(external_no or "").strip().casefold()
-        no_object = has_no_object_marker(description) or bool(external_token and external_token in no_object_by_party.get(int(party_id), set()))
-        no_decree = (not str(decree_no or "").strip()) or bool(external_token and external_token in no_decree_by_party.get(int(party_id), set()))
+        party_id = int(obj.party_id)
+        no_object = has_no_object_marker(obj.object_description) or any(control_token_matches_object(token, obj) for token in no_object_by_party.get(party_id, set()))
+        no_decree = (not str(obj.decree_no or "").strip()) or any(control_token_matches_object(token, obj) for token in no_decree_by_party.get(party_id, set()))
         if no_object:
-            counters[int(party_id)]["no_object"] += 1
+            counters[party_id]["no_object"] += 1
         if no_decree:
-            counters[int(party_id)]["no_decree"] += 1
-        if _is_no_biomaterial(description):
-            counters[int(party_id)]["no_biomaterial"] += 1
-        if _is_burnt_bone(description):
-            counters[int(party_id)]["burnt_bone"] += 1
+            counters[party_id]["no_decree"] += 1
+        if _is_no_biomaterial(obj.object_description):
+            counters[party_id]["no_biomaterial"] += 1
+        if _is_burnt_bone(obj.object_description):
+            counters[party_id]["burnt_bone"] += 1
     return counters
 
 

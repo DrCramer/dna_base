@@ -420,6 +420,39 @@ function joinControlNumbers(values: string[]) {
   return unique.join(', ')
 }
 
+function controlTokenBase(value: unknown) {
+  return normalizeControlNo(String(value || '').replace(/\s*(?:\[[^\]]+\]|\([^)]+\))\s*$/, ''))
+}
+
+function rowExternalMilitaryNo(row: StageTableRow) {
+  return String(row.values.external_military_no || row.object.external_military_no || '').trim()
+}
+
+function rowRcsmeNo(row: StageTableRow) {
+  return String(row.values.rcsme_reg_no || row.object.rcsme_reg_no || '').trim()
+}
+
+function controlTokenForRow(row: StageTableRow, precise: boolean) {
+  const externalMilitaryNo = rowExternalMilitaryNo(row)
+  if (!externalMilitaryNo) return ''
+  if (!precise) return externalMilitaryNo
+  return `${externalMilitaryNo} [${rowRcsmeNo(row) || `#${row.object.id}`}]`
+}
+
+function controlSetHasRow(tokens: Set<string>, row: StageTableRow, preciseOnly = false) {
+  const externalMilitaryNo = rowExternalMilitaryNo(row)
+  if (!externalMilitaryNo) return false
+  const external = normalizeControlNo(externalMilitaryNo)
+  const regNo = normalizeControlNo(rowRcsmeNo(row))
+  const objectId = `#${row.object.id}`
+  for (const token of tokens) {
+    if (controlTokenBase(token) !== external) continue
+    if (token === external) return !preciseOnly
+    if ((regNo && token.includes(regNo)) || token.includes(objectId)) return true
+  }
+  return false
+}
+
 function columnFilterValue(row: StageTableRow, column: StageTableColumn) {
   return formatCell(row.values[column.key], column)
 }
@@ -683,6 +716,15 @@ function StageGrid({
     const needle = filterSearch.trim().toLowerCase()
     return needle ? filterValues.filter((value) => value.toLowerCase().includes(needle)) : filterValues
   }, [filterSearch, filterValues])
+  const externalMilitaryCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const row of allRows) {
+      const normalized = normalizeControlNo(rowExternalMilitaryNo(row))
+      if (!normalized) continue
+      counts.set(normalized, (counts.get(normalized) || 0) + 1)
+    }
+    return counts
+  }, [allRows])
   const selectableRows = rows.filter((row) => !isControlRow(row) && !isBlockedNoObjectStageRow(activeStage, row))
   function openFilter(column: StageTableColumn) {
     const values = Array.from(new Set(allRows.map((row) => columnFilterValue(row, column)))).sort((a, b) => a.localeCompare(b, 'ru'))
@@ -751,8 +793,9 @@ function StageGrid({
                 const value = hasDraft ? draftValue : row.values[column.key]
                 const editable = !controlRow && !blockedNoObjectRow && canEdit && isStageEditable(activeStage, column)
                 const externalMilitaryNo = String(row.values.external_military_no || row.object.external_military_no || '').trim()
-                const noObjectControlChecked = externalMilitaryNo ? registrationNoObjectNumbers.has(normalizeControlNo(externalMilitaryNo)) : false
-                const noDecreeControlChecked = externalMilitaryNo ? registrationNoDecreeNumbers.has(normalizeControlNo(externalMilitaryNo)) : false
+                const requiresPreciseControl = (externalMilitaryCounts.get(normalizeControlNo(externalMilitaryNo)) || 0) > 1
+                const noObjectControlChecked = externalMilitaryNo ? controlSetHasRow(registrationNoObjectNumbers, row, requiresPreciseControl) : false
+                const noDecreeControlChecked = externalMilitaryNo ? controlSetHasRow(registrationNoDecreeNumbers, row, requiresPreciseControl) : false
                 const registrationActiveChecked = registrationActiveIds.has(row.object.id)
                 return (
                   <div
@@ -1183,6 +1226,20 @@ export function PartiesPage({
     () => new Set(splitControlNumbers(controlDraft.control_object_without_decree).map(normalizeControlNo)),
     [controlDraft.control_object_without_decree]
   )
+  const registrationDuplicateExternalNumbers = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const row of rows) {
+      if (activeStage !== 'registration') continue
+      const normalized = normalizeControlNo(rowExternalMilitaryNo(row))
+      if (!normalized) continue
+      counts.set(normalized, (counts.get(normalized) || 0) + 1)
+    }
+    return new Set(Array.from(counts.entries()).filter(([, count]) => count > 1).map(([key]) => key))
+  }, [activeStage, rows])
+
+  function rowNeedsPreciseControlToken(row: StageTableRow) {
+    return registrationDuplicateExternalNumbers.has(normalizeControlNo(rowExternalMilitaryNo(row)))
+  }
 
   const createParty = useMutation({
     mutationFn: () => api.createParty({ party_no: newPartyNo.trim(), case_year: selectedYear ?? partyYears.data?.default_year ?? new Date().getFullYear(), comment: newComment.trim() || null }),
@@ -1357,9 +1414,10 @@ export function PartiesPage({
       const externalMilitaryNo = String(row.values.external_military_no || row.object.external_military_no || '').trim()
       if (!externalMilitaryNo) throw new Error('Нет значения № в в/ч №522')
       const current = splitControlNumbers(controlDraft.control_decree_without_object)
-      const normalized = normalizeControlNo(externalMilitaryNo)
+      const token = controlTokenForRow(row, rowNeedsPreciseControlToken(row))
+      const normalized = normalizeControlNo(token)
       const next = checked
-        ? [...current, externalMilitaryNo]
+        ? [...current, token]
         : current.filter((item) => normalizeControlNo(item) !== normalized)
       return api.updateParty(activeParty.id, {
         control_decree_without_object: joinControlNumbers(next) || null
@@ -1384,9 +1442,10 @@ export function PartiesPage({
       const externalMilitaryNo = String(row.values.external_military_no || row.object.external_military_no || '').trim()
       if (!externalMilitaryNo) throw new Error('Нет значения № в в/ч №522')
       const current = splitControlNumbers(controlDraft.control_object_without_decree)
-      const normalized = normalizeControlNo(externalMilitaryNo)
+      const token = controlTokenForRow(row, rowNeedsPreciseControlToken(row))
+      const normalized = normalizeControlNo(token)
       const next = checked
-        ? [...current, externalMilitaryNo]
+        ? [...current, token]
         : current.filter((item) => normalizeControlNo(item) !== normalized)
       return api.updateParty(activeParty.id, {
         control_object_without_decree: joinControlNumbers(next) || null
@@ -1414,14 +1473,9 @@ export function PartiesPage({
     controlToastTimer.current = window.setTimeout(() => setControlToast(''), 3000)
   }
 
-  function rowExternalMilitaryNo(row: StageTableRow) {
-    return String(row.values.external_military_no || row.object.external_military_no || '').trim()
-  }
-
   function handleToggleNoObjectControl(row: StageTableRow, checked: boolean) {
-    const externalMilitaryNo = rowExternalMilitaryNo(row)
-    const normalized = normalizeControlNo(externalMilitaryNo)
-    if (checked && normalized && registrationNoDecreeNumbers.has(normalized)) {
+    const normalized = normalizeControlNo(controlTokenForRow(row, rowNeedsPreciseControlToken(row)))
+    if (checked && normalized && controlSetHasRow(registrationNoDecreeNumbers, row)) {
       showControlConflictToast()
       return
     }
@@ -1429,9 +1483,8 @@ export function PartiesPage({
   }
 
   function handleToggleNoDecreeControl(row: StageTableRow, checked: boolean) {
-    const externalMilitaryNo = rowExternalMilitaryNo(row)
-    const normalized = normalizeControlNo(externalMilitaryNo)
-    if (checked && normalized && registrationNoObjectNumbers.has(normalized)) {
+    const normalized = normalizeControlNo(controlTokenForRow(row, rowNeedsPreciseControlToken(row)))
+    if (checked && normalized && controlSetHasRow(registrationNoObjectNumbers, row)) {
       showControlConflictToast()
       return
     }
