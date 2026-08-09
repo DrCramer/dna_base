@@ -3,6 +3,7 @@ import { Archive, BarChart3, Check, ChevronDown, ChevronRight, ClipboardList, Co
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type { Employee, Party, ReferenceItem, RegistrationBulkRequest, RegistrationBulkRow, RegistryObject, StageTable, StageTableColumn, StageTableEvent, StageTableRow, User } from '../api/types'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
 
 const stageTabs = [
   ['registration', 'Регистрация'],
@@ -30,6 +31,32 @@ const stageLabels: Record<string, string> = {
   analysis: 'Анализ',
   registration: 'Регистрация',
   all: 'Все этапы'
+}
+
+const progressStageOrder = [
+  'registration',
+  'sample_prep',
+  'preparation',
+  'milling',
+  'dna_extraction',
+  'extraction',
+  'realtime',
+  'pcr',
+  'electrophoresis',
+  'analysis'
+]
+
+function orderedStageCounts(stageCounts: Record<string, number>) {
+  const used = new Set<string>()
+  const ordered = progressStageOrder.flatMap((stage) => {
+    if (!(stage in stageCounts) || used.has(stage)) return []
+    used.add(stage)
+    return [[stage, stageCounts[stage]] as const]
+  })
+  const rest = Object.entries(stageCounts)
+    .filter(([stage]) => !used.has(stage))
+    .sort(([left], [right]) => left.localeCompare(right))
+  return [...ordered, ...rest]
 }
 
 const sourceLabels: Record<string, string> = {
@@ -498,11 +525,36 @@ const partyControlFields = [
 
 type PartyControlKey = (typeof partyControlFields)[number][0]
 type PartyControlDraft = Record<PartyControlKey, string>
+type ControlToggleVariables = {
+  partyId: number
+  payload: Partial<Party>
+  nextDraft: PartyControlDraft
+  previousDraft: PartyControlDraft
+}
 
 function partyControlDraft(party: Party | null | undefined): PartyControlDraft {
   return Object.fromEntries(
     partyControlFields.map(([key]) => [key, String(party?.[key] || '')])
   ) as PartyControlDraft
+}
+
+function controlDraftWithToggle(
+  draft: PartyControlDraft,
+  key: PartyControlKey,
+  row: StageTableRow,
+  checked: boolean,
+  precise: boolean
+) {
+  const token = controlTokenForRow(row, precise)
+  const normalized = normalizeControlNo(token)
+  const current = splitControlNumbers(draft[key])
+  const next = checked
+    ? [...current, token]
+    : current.filter((item) => normalizeControlNo(item) !== normalized)
+  return {
+    ...draft,
+    [key]: joinControlNumbers(next)
+  }
 }
 
 function headerLines(label: string) {
@@ -636,8 +688,6 @@ function StageGrid({
   registrationNoObjectNumbers,
   registrationNoDecreeNumbers,
   registrationActiveIds,
-  noObjectTogglePending,
-  noDecreeTogglePending,
   onToggle,
   onToggleAll,
   onDraft,
@@ -664,8 +714,6 @@ function StageGrid({
   registrationNoObjectNumbers: Set<string>
   registrationNoDecreeNumbers: Set<string>
   registrationActiveIds: Set<number>
-  noObjectTogglePending: boolean
-  noDecreeTogglePending: boolean
   onToggle: (id: number) => void
   onToggleAll: () => void
   onDraft: (id: string, key: string, value: DraftValue) => void
@@ -770,9 +818,13 @@ function StageGrid({
           const analysisCount = stageAttemptCount(row)
           const controlRow = isControlRow(row)
           const blockedNoObjectRow = isBlockedNoObjectStageRow(activeStage, row)
+          const externalMilitaryNo = rowExternalMilitaryNo(row)
+          const requiresPreciseControl = (externalMilitaryCounts.get(normalizeControlNo(externalMilitaryNo)) || 0) > 1
+          const noObjectControlChecked = externalMilitaryNo ? controlSetHasRow(registrationNoObjectNumbers, row, requiresPreciseControl) : false
+          const noDecreeControlChecked = externalMilitaryNo ? controlSetHasRow(registrationNoDecreeNumbers, row, requiresPreciseControl) : false
           return (
             <div
-              className={`stage-grid-row stage-grid-body-row${isNoObjectRow(row) ? ' no-object-row' : ''}${repeatRow ? ' repeat-object-row' : ''}${stageAttemptRepeatRow ? ' stage-attempt-repeat-row' : ''}${controlRow ? ' control-row' : ''}`}
+              className={`stage-grid-row stage-grid-body-row${isNoObjectRow(row) || noObjectControlChecked ? ' no-object-row' : ''}${repeatRow ? ' repeat-object-row' : ''}${stageAttemptRepeatRow ? ' stage-attempt-repeat-row' : ''}${controlRow ? ' control-row' : ''}`}
               role="row"
               key={rowKey}
               style={rowStyle}
@@ -792,10 +844,6 @@ function StageGrid({
                 const hasDraft = Object.prototype.hasOwnProperty.call(draft, column.key)
                 const value = hasDraft ? draftValue : row.values[column.key]
                 const editable = !controlRow && !blockedNoObjectRow && canEdit && isStageEditable(activeStage, column)
-                const externalMilitaryNo = String(row.values.external_military_no || row.object.external_military_no || '').trim()
-                const requiresPreciseControl = (externalMilitaryCounts.get(normalizeControlNo(externalMilitaryNo)) || 0) > 1
-                const noObjectControlChecked = externalMilitaryNo ? controlSetHasRow(registrationNoObjectNumbers, row, requiresPreciseControl) : false
-                const noDecreeControlChecked = externalMilitaryNo ? controlSetHasRow(registrationNoDecreeNumbers, row, requiresPreciseControl) : false
                 const registrationActiveChecked = registrationActiveIds.has(row.object.id)
                 return (
                   <div
@@ -812,7 +860,7 @@ function StageGrid({
                         <input
                           type="checkbox"
                           checked={noObjectControlChecked}
-                          disabled={!canEdit || noObjectTogglePending || noDecreeTogglePending || !externalMilitaryNo}
+                          disabled={!canEdit || !externalMilitaryNo}
                           onChange={(event) => onToggleNoObjectControl(row, event.target.checked)}
                         />
                       </label>
@@ -824,7 +872,7 @@ function StageGrid({
                         <input
                           type="checkbox"
                           checked={noDecreeControlChecked}
-                          disabled={!canEdit || noObjectTogglePending || noDecreeTogglePending || !externalMilitaryNo}
+                          disabled={!canEdit || !externalMilitaryNo}
                           onChange={(event) => onToggleNoDecreeControl(row, event.target.checked)}
                         />
                       </label>
@@ -1078,15 +1126,19 @@ export function PartiesPage({
   const [copyMessage, setCopyMessage] = useState('')
   const [controlToast, setControlToast] = useState('')
   const controlToastTimer = useRef<number | null>(null)
+  const controlDraftRef = useRef<PartyControlDraft>(partyControlDraft(null))
+  const controlMutationVersion = useRef(0)
   const [hiddenColumns, setHiddenColumns] = useState<HiddenColumnState>(() => loadHiddenColumns(user.username))
   const [registrationActiveChecks, setRegistrationActiveChecks] = useState<RegistrationActiveState>(() => loadRegistrationActiveChecks(user.username))
   const [controlDraft, setControlDraft] = useState<PartyControlDraft>(() => partyControlDraft(null))
   const [controlCollapsed, setControlCollapsed] = useState(true)
   const canEdit = user.role !== 'viewer'
   const hasDrafts = Object.keys(drafts).length > 0
+  const debouncedPartySearch = useDebouncedValue(q.trim(), 250)
+  const debouncedObjectQuery = useDebouncedValue(objectQuery.trim(), 250)
 
   const partyYears = useQuery({ queryKey: ['parties', 'years'], queryFn: api.partyYears, staleTime: 300_000 })
-  const parties = useQuery({ queryKey: ['parties', q, includeArchived, selectedYear], queryFn: () => api.parties(q, includeArchived, selectedYear), staleTime: 30_000 })
+  const parties = useQuery({ queryKey: ['parties', debouncedPartySearch, includeArchived, selectedYear], queryFn: () => api.parties(debouncedPartySearch, includeArchived, selectedYear), staleTime: 30_000 })
   const selected = selectedId ?? parties.data?.items?.[0]?.id ?? null
   const selectedPartyFromList = useMemo(
     () => parties.data?.items?.find((item) => item.id === selected) ?? null,
@@ -1097,8 +1149,8 @@ export function PartiesPage({
   const employees = useQuery({ queryKey: ['employees', 'active-for-stage'], queryFn: () => api.employees(''), staleTime: 60_000 })
   const referenceItems = useQuery({ queryKey: ['reference-items', 'active-for-stage'], queryFn: () => api.referenceItems(), staleTime: 60_000 })
   const stageTable = useQuery({
-    queryKey: ['party-stage-table', selected, activeStage, objectQuery, quick],
-    queryFn: () => api.partyStageTable(selected!, activeStage, objectQuery, quick, true),
+    queryKey: ['party-stage-table', selected, activeStage, debouncedObjectQuery, quick],
+    queryFn: () => api.partyStageTable(selected!, activeStage, debouncedObjectQuery, quick, true),
     enabled: Boolean(selected),
     staleTime: 30_000,
     refetchOnWindowFocus: false,
@@ -1401,7 +1453,9 @@ export function PartiesPage({
       return api.updateParty(activeParty.id, payload)
     },
     onSuccess: (updated) => {
-      setControlDraft(partyControlDraft(updated))
+      const next = partyControlDraft(updated)
+      controlDraftRef.current = next
+      setControlDraft(next)
       queryClient.invalidateQueries({ queryKey: ['parties'] })
       queryClient.invalidateQueries({ queryKey: ['party'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
@@ -1409,59 +1463,59 @@ export function PartiesPage({
     }
   })
   const toggleNoObjectControl = useMutation({
-    mutationFn: ({ row, checked }: { row: StageTableRow; checked: boolean }) => {
-      if (!activeParty) throw new Error('Партия не выбрана')
-      const externalMilitaryNo = String(row.values.external_military_no || row.object.external_military_no || '').trim()
-      if (!externalMilitaryNo) throw new Error('Нет значения № в в/ч №522')
-      const current = splitControlNumbers(controlDraft.control_decree_without_object)
-      const token = controlTokenForRow(row, rowNeedsPreciseControlToken(row))
-      const normalized = normalizeControlNo(token)
-      const next = checked
-        ? [...current, token]
-        : current.filter((item) => normalizeControlNo(item) !== normalized)
-      return api.updateParty(activeParty.id, {
-        control_decree_without_object: joinControlNumbers(next) || null
-      })
+    mutationFn: ({ partyId, payload }: ControlToggleVariables) => {
+      return api.updateParty(partyId, payload)
     },
-    onSuccess: (updated) => {
-      setControlDraft((prev) => ({
-        ...prev,
-        control_decree_without_object: updated.control_decree_without_object || ''
-      }))
+    onMutate: (variables) => {
+      const version = controlMutationVersion.current + 1
+      controlMutationVersion.current = version
+      controlDraftRef.current = variables.nextDraft
+      setControlDraft(variables.nextDraft)
+      return { version, previousDraft: variables.previousDraft }
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.version !== controlMutationVersion.current) return
+      controlDraftRef.current = context.previousDraft
+      setControlDraft(context.previousDraft)
+    },
+    onSuccess: (updated, _variables, context) => {
+      if (context?.version === controlMutationVersion.current) {
+        const next = {
+          ...controlDraftRef.current,
+          control_decree_without_object: updated.control_decree_without_object || ''
+        }
+        controlDraftRef.current = next
+        setControlDraft(next)
+      }
       queryClient.setQueryData(['party', updated.id], updated)
-      queryClient.invalidateQueries({ queryKey: ['parties'] })
-      queryClient.invalidateQueries({ queryKey: ['party'] })
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
-      queryClient.invalidateQueries({ queryKey: ['party-progress'] })
-      queryClient.invalidateQueries({ queryKey: ['party-stage-table'] })
     }
   })
   const toggleNoDecreeControl = useMutation({
-    mutationFn: ({ row, checked }: { row: StageTableRow; checked: boolean }) => {
-      if (!activeParty) throw new Error('Партия не выбрана')
-      const externalMilitaryNo = String(row.values.external_military_no || row.object.external_military_no || '').trim()
-      if (!externalMilitaryNo) throw new Error('Нет значения № в в/ч №522')
-      const current = splitControlNumbers(controlDraft.control_object_without_decree)
-      const token = controlTokenForRow(row, rowNeedsPreciseControlToken(row))
-      const normalized = normalizeControlNo(token)
-      const next = checked
-        ? [...current, token]
-        : current.filter((item) => normalizeControlNo(item) !== normalized)
-      return api.updateParty(activeParty.id, {
-        control_object_without_decree: joinControlNumbers(next) || null
-      })
+    mutationFn: ({ partyId, payload }: ControlToggleVariables) => {
+      return api.updateParty(partyId, payload)
     },
-    onSuccess: (updated) => {
-      setControlDraft((prev) => ({
-        ...prev,
-        control_object_without_decree: updated.control_object_without_decree || ''
-      }))
+    onMutate: (variables) => {
+      const version = controlMutationVersion.current + 1
+      controlMutationVersion.current = version
+      controlDraftRef.current = variables.nextDraft
+      setControlDraft(variables.nextDraft)
+      return { version, previousDraft: variables.previousDraft }
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.version !== controlMutationVersion.current) return
+      controlDraftRef.current = context.previousDraft
+      setControlDraft(context.previousDraft)
+    },
+    onSuccess: (updated, _variables, context) => {
+      if (context?.version === controlMutationVersion.current) {
+        const next = {
+          ...controlDraftRef.current,
+          control_object_without_decree: updated.control_object_without_decree || ''
+        }
+        controlDraftRef.current = next
+        setControlDraft(next)
+      }
       queryClient.setQueryData(['party', updated.id], updated)
-      queryClient.invalidateQueries({ queryKey: ['parties'] })
-      queryClient.invalidateQueries({ queryKey: ['party'] })
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
-      queryClient.invalidateQueries({ queryKey: ['party-progress'] })
-      queryClient.invalidateQueries({ queryKey: ['party-stage-table'] })
     }
   })
 
@@ -1474,21 +1528,43 @@ export function PartiesPage({
   }
 
   function handleToggleNoObjectControl(row: StageTableRow, checked: boolean) {
-    const normalized = normalizeControlNo(controlTokenForRow(row, rowNeedsPreciseControlToken(row)))
-    if (checked && normalized && controlSetHasRow(registrationNoDecreeNumbers, row)) {
+    if (!activeParty) return
+    const precise = rowNeedsPreciseControlToken(row)
+    const externalMilitaryNo = rowExternalMilitaryNo(row)
+    if (!externalMilitaryNo) return
+    const currentNoDecree = new Set(splitControlNumbers(controlDraftRef.current.control_object_without_decree).map(normalizeControlNo))
+    if (checked && controlSetHasRow(currentNoDecree, row)) {
       showControlConflictToast()
       return
     }
-    toggleNoObjectControl.mutate({ row, checked })
+    const previousDraft = controlDraftRef.current
+    const nextDraft = controlDraftWithToggle(previousDraft, 'control_decree_without_object', row, checked, precise)
+    toggleNoObjectControl.mutate({
+      partyId: activeParty.id,
+      previousDraft,
+      nextDraft,
+      payload: { control_decree_without_object: nextDraft.control_decree_without_object || null }
+    })
   }
 
   function handleToggleNoDecreeControl(row: StageTableRow, checked: boolean) {
-    const normalized = normalizeControlNo(controlTokenForRow(row, rowNeedsPreciseControlToken(row)))
-    if (checked && normalized && controlSetHasRow(registrationNoObjectNumbers, row)) {
+    if (!activeParty) return
+    const precise = rowNeedsPreciseControlToken(row)
+    const externalMilitaryNo = rowExternalMilitaryNo(row)
+    if (!externalMilitaryNo) return
+    const currentNoObject = new Set(splitControlNumbers(controlDraftRef.current.control_decree_without_object).map(normalizeControlNo))
+    if (checked && controlSetHasRow(currentNoObject, row)) {
       showControlConflictToast()
       return
     }
-    toggleNoDecreeControl.mutate({ row, checked })
+    const previousDraft = controlDraftRef.current
+    const nextDraft = controlDraftWithToggle(previousDraft, 'control_object_without_decree', row, checked, precise)
+    toggleNoDecreeControl.mutate({
+      partyId: activeParty.id,
+      previousDraft,
+      nextDraft,
+      payload: { control_object_without_decree: nextDraft.control_object_without_decree || null }
+    })
   }
 
   function handleToggleRegistrationActive(row: StageTableRow, checked: boolean) {
@@ -1725,9 +1801,14 @@ export function PartiesPage({
 
   useEffect(() => {
     setControlDraft(partyControlDraft(activeParty))
+    controlDraftRef.current = partyControlDraft(activeParty)
     setControlCollapsed(true)
     savePartyControl.reset()
   }, [activeParty?.id])
+
+  useEffect(() => {
+    controlDraftRef.current = controlDraft
+  }, [controlDraft])
 
   useEffect(() => {
     setSelectedRows(new Set())
@@ -1736,7 +1817,7 @@ export function PartiesPage({
     setFillListResult(null)
     setPrintTables({})
     setPrintColumnKeys({})
-  }, [activeStage, objectQuery, quick])
+  }, [activeStage, debouncedObjectQuery, quick])
 
   useEffect(() => {
     saveHiddenColumns(user.username, hiddenColumns)
@@ -2162,7 +2243,7 @@ export function PartiesPage({
                 {stageTabs.map(([key, label]) => <button key={key} className={activeStage === key ? 'active' : ''} onClick={() => setActiveStage(key)}>{label}</button>)}
               </div>
               <div className="chips party-progress">
-                {Object.entries(progress.data?.stage_counts ?? {}).map(([stage, count]) => <span key={stage}>{stageLabels[stage] || stage}: {count}</span>)}
+                {orderedStageCounts(progress.data?.stage_counts ?? {}).map(([stage, count]) => <span key={stage}>{stageLabels[stage] || stage}: {count}</span>)}
                 {!Object.keys(progress.data?.stage_counts ?? {}).length && <span>Этапов нет</span>}
               </div>
               <div className="toolbar stage-toolbar">
@@ -2217,8 +2298,6 @@ export function PartiesPage({
                 showActionsColumn={showActionsColumn}
                 registrationNoObjectNumbers={registrationNoObjectNumbers}
                 registrationNoDecreeNumbers={registrationNoDecreeNumbers}
-                noObjectTogglePending={toggleNoObjectControl.isPending}
-                noDecreeTogglePending={toggleNoDecreeControl.isPending}
                 onToggle={toggleRow}
                 onToggleAll={toggleAllRows}
                 onDraft={setDraft}

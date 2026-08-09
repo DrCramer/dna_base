@@ -1044,6 +1044,23 @@ main {
   justify-content: center;
 }
 
+.objects-page {
+  height: calc(100vh / var(--ui-scale));
+  min-height: 0;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.objects-page .section {
+  min-width: 0;
+}
+
+.objects-page .table-wrap {
+  height: auto;
+  min-height: 0;
+  overflow: auto;
+}
+
 .filter-panel label,
 .export-option-list label,
 .import-help-card,
@@ -4247,6 +4264,16 @@ textarea { min-height: 96px; resize: vertical; }
 
   .objects-filter-panel {
     grid-template-columns: 1fr;
+  }
+  .objects-page {
+    height: auto;
+    min-height: calc(100vh / var(--ui-scale));
+    grid-template-rows: none;
+    overflow: visible;
+  }
+  .objects-page .table-wrap {
+    height: 60vh;
+    overflow: auto;
   }
   main {
     overflow: visible;

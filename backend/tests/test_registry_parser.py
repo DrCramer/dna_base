@@ -87,11 +87,29 @@ def test_registry_109_extracts_late_pcr_electrophoresis_and_analysis():
     assert first["rcsme_reg_no"] == "101-1"
     assert pcr["data"]["pcr_date"] == date(2026, 2, 2)
     assert pcr["data"]["locus_panel"] == "GlobalFiltr"
+    assert pcr["data"]["normalization_performer"] == "Попова М.М."
+    assert pcr["data"]["pcr_performer"] == "Попова М.М."
     assert electrophoresis["data"]["electrophoresis_date"] == date(2026, 2, 3)
     assert electrophoresis["data"]["pipetting_method"] == "Ручной"
     assert electrophoresis["data"]["performer_1"] == "Попова М.М."
     assert analysis["data"]["analysis_date"] == date(2026, 2, 4)
     assert analysis["data"]["performer"] == "Смоляницкая А.И."
+
+    specs = [spec for event in events for spec in registry_event_specs(event)]
+    pcr_spec = [spec for spec in specs if spec["stage_type"] == "pcr"][0]
+    electrophoresis_spec = [spec for spec in specs if spec["stage_type"] == "electrophoresis"][0]
+    analysis_spec = [spec for spec in specs if spec["stage_type"] == "analysis"][0]
+
+    assert pcr_spec["detail_data"]["normalization_performers"] == ["Попова М.М."]
+    assert pcr_spec["detail_data"]["pcr_performers"] == ["Попова М.М."]
+    assert pcr_spec["performers"] == [
+        {"raw_name": "Попова М.М.", "role": "normalization"},
+        {"raw_name": "Попова М.М.", "role": "pcr"},
+    ]
+    assert electrophoresis_spec["detail_data"]["performers"] == ["Попова М.М."]
+    assert electrophoresis_spec["performers"][0] == {"raw_name": "Попова М.М.", "role": "performer"}
+    assert analysis_spec["detail_data"]["analysis_date"] == date(2026, 2, 4)
+    assert analysis_spec["performers"] == [{"raw_name": "Смоляницкая А.И.", "role": "analysis"}]
 
 
 @pytest.mark.parametrize(
@@ -140,6 +158,9 @@ def test_registry_114_dash_dates_restore_first_analysis():
     by_no = {row["rcsme_reg_no"]: row for row in preview.rows}
 
     first = by_no["511-1"]
+    first_pcr = [
+        event for event in first["stage_events"] if event["table"] == "pcr_events"
+    ][0]
     first_electrophoresis = [
         event for event in first["stage_events"] if event["table"] == "electrophoresis_events"
     ][0]
@@ -152,7 +173,11 @@ def test_registry_114_dash_dates_restore_first_analysis():
         event for event in repeated["stage_events"] if event["table"] == "electrophoresis_analysis_events"
     ]
 
+    assert first_pcr["data"]["pcr_date"] == date(2026, 5, 19)
+    assert first_pcr["data"]["pcr_performer"] == "Непомнящая Л.В."
     assert first_electrophoresis["data"]["electrophoresis_date"] == date(2026, 5, 20)
+    assert first_electrophoresis["data"]["sequencer"] == "3500"
+    assert first_electrophoresis["data"]["performer_1"] == "Непомнящая Л.В."
     assert first_analysis["data"]["analysis_date"] == date(2026, 5, 21)
     assert first_analysis["data"]["performer"] == "Непомнящая Л.В."
     assert [(event["data"]["attempt_no"], event["data"]["analysis_date"]) for event in repeated_analysis] == [

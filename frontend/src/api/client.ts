@@ -49,11 +49,14 @@ function apiBases(): string[] {
   if (prefix) {
     bases.unshift(`${prefix}/api`)
   }
-  for (const candidatePort of ['4001', '4000']) {
-    if (port !== candidatePort && hostname) {
-      bases.push(`${protocol}//${hostname}:${candidatePort}/api`)
-      if (protocol !== 'http:') {
-        bases.push(`http://${hostname}:${candidatePort}/api`)
+  const isViteDevServer = port === '5173'
+  if (isViteDevServer) {
+    for (const candidatePort of ['4001', '4000']) {
+      if (port !== candidatePort && hostname) {
+        bases.push(`${protocol}//${hostname}:${candidatePort}/api`)
+        if (protocol !== 'http:') {
+          bases.push(`http://${hostname}:${candidatePort}/api`)
+        }
       }
     }
   }

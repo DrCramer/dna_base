@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import type { RegistryObjectListItemBase } from '../api/types'
 import { EmptyState, ErrorState, LoadingState, PageHeader } from '../components/ui'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
 
 type ObjectQuickFilter = 'no_object' | 'no_decree' | 'no_biomaterial' | 'burned' | 'no_analysis' | 'no_pcr' | 'has_repeats'
 
@@ -86,6 +87,8 @@ export function ObjectsPage({
   const [boxFilter, setBoxFilter] = useState('')
   const [onlyActive, setOnlyActive] = useState(true)
   const [quickFilters, setQuickFilters] = useState<Set<ObjectQuickFilter>>(() => new Set())
+  const debouncedQ = useDebouncedValue(q.trim(), 250)
+  const debouncedPartyFilter = useDebouncedValue((partyFilter || '').trim(), 250)
   useEffect(() => setQ(initialQuery), [initialQuery])
 
   function changeQuery(query: string) {
@@ -120,8 +123,8 @@ export function ObjectsPage({
 
   const partyYears = useQuery({ queryKey: ['parties', 'years', 'objects'], queryFn: api.partyYears, staleTime: 300_000 })
   const { data, isFetching, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['objects', q, partyFilter, yearFilter],
-    queryFn: () => api.objects(q, partyFilter, yearFilter ? Number(yearFilter) : null),
+    queryKey: ['objects', debouncedQ, debouncedPartyFilter, yearFilter],
+    queryFn: () => api.objects(debouncedQ, debouncedPartyFilter || null, yearFilter ? Number(yearFilter) : null),
     staleTime: 30_000,
     refetchOnWindowFocus: false,
     placeholderData: (previous) => previous
@@ -151,7 +154,7 @@ export function ObjectsPage({
   const visibleRows = sortedRows.slice(0, 300)
 
   return (
-    <div className="page">
+    <div className="page objects-page">
       <PageHeader
         title="Объекты"
         description="Общий список объектов с поиском по номерам, партиям, описанию, следователю и этапам."

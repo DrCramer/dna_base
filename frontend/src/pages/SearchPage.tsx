@@ -3,6 +3,7 @@ import { Search, SearchCheck } from 'lucide-react'
 import { useState } from 'react'
 import { api } from '../api/client'
 import { EmptyState, LoadingState, PageHeader } from '../components/ui'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
 
 const searchExamples = ['6606-1', '6606-2026', 'ии1285', 'партия 196', 'Непомнящая', 'GlobalFiler', 'горелая кость']
 
@@ -14,22 +15,23 @@ export function SearchPage({
   onPartyOpen: (partyNo: string) => void
 }) {
   const [q, setQ] = useState('')
+  const debouncedQ = useDebouncedValue(q.trim(), 250)
   const { data, isFetching } = useQuery({
-    queryKey: ['global-search', q],
-    queryFn: () => api.objects(q),
-    enabled: q.trim().length > 1,
+    queryKey: ['global-search', debouncedQ],
+    queryFn: () => api.objects(debouncedQ),
+    enabled: debouncedQ.length > 1,
     staleTime: 20_000,
     refetchOnWindowFocus: false
   })
   const parties = useQuery({
-    queryKey: ['global-search', 'parties', q],
-    queryFn: () => api.parties(q, false),
-    enabled: q.trim().length > 1,
+    queryKey: ['global-search', 'parties', debouncedQ],
+    queryFn: () => api.parties(debouncedQ, false),
+    enabled: debouncedQ.length > 1,
     staleTime: 20_000,
     refetchOnWindowFocus: false
   })
-  const objects = data?.items ?? []
-  const partyRows = parties.data?.items ?? []
+  const objects = debouncedQ.length > 1 ? data?.items ?? [] : []
+  const partyRows = debouncedQ.length > 1 ? parties.data?.items ?? [] : []
   const foundCount = (data?.total ?? 0) + partyRows.length
   return (
     <div className="page">
@@ -73,7 +75,7 @@ export function SearchPage({
             </div>
           </div>
         )}
-        {(isFetching || parties.isFetching) && q.trim().length > 1 && !objects.length && !partyRows.length && <LoadingState title="Идёт поиск..." rows={4} />}
+        {(isFetching || parties.isFetching) && debouncedQ.length > 1 && !objects.length && !partyRows.length && <LoadingState title="Идёт поиск..." rows={4} />}
         {q.trim().length < 2 && (
           <EmptyState icon={<SearchCheck size={22} />} title="Введите запрос">
             Можно искать по № рег РЦСМЭ, № постановления, № в в/ч №522, партии, следователю, исполнителю, методу, типу объекта или комментарию.
@@ -89,7 +91,7 @@ export function SearchPage({
             </div>
           </div>
         )}
-        {q.trim().length > 1 && !objects.length && !partyRows.length && !isFetching && !parties.isFetching && (
+        {debouncedQ.length > 1 && !objects.length && !partyRows.length && !isFetching && !parties.isFetching && (
           <EmptyState title="Ничего не найдено">
             Проверьте номер или попробуйте более общий запрос.
           </EmptyState>

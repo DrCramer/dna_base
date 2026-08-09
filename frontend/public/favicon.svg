@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="ДНК реестр">
+  <defs>
+    <linearGradient id="bg" x1="10" y1="6" x2="54" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1f2a32"/>
+      <stop offset="1" stop-color="#12171d"/>
+    </linearGradient>
+    <linearGradient id="dna" x1="19" y1="12" x2="45" y2="52" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6ed7c5"/>
+      <stop offset="1" stop-color="#2d9b8d"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000" flood-opacity=".28"/>
+    </filter>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <path d="M16 49c13 0 16-34 32-34" fill="none" stroke="#d9f7f2" stroke-width="4.4" stroke-linecap="round" filter="url(#softShadow)"/>
+  <path d="M16 15c13 0 16 34 32 34" fill="none" stroke="url(#dna)" stroke-width="4.4" stroke-linecap="round" filter="url(#softShadow)"/>
+  <g stroke="#8fe3d7" stroke-width="2.2" stroke-linecap="round">
+    <path d="M23 18h18"/>
+    <path d="M21 28h22"/>
+    <path d="M21 36h22"/>
+    <path d="M23 46h18"/>
+  </g>
+  <circle cx="19" cy="15" r="3.2" fill="#6ed7c5"/>
+  <circle cx="45" cy="49" r="3.2" fill="#6ed7c5"/>
+  <circle cx="45" cy="15" r="3.2" fill="#f2c94c"/>
+  <circle cx="19" cy="49" r="3.2" fill="#f2c94c"/>
+</svg>
