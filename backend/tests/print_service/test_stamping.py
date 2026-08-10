@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import fitz
+from openpyxl import Workbook
 from pypdf import PdfReader, PdfWriter
 
 from app.print_service.services.matching_service import match_documents
@@ -8,6 +9,8 @@ from app.print_service.services.stamping_service import (
     StampingValidationError,
     apply_stamping_to_validation,
     normalize_stamp_style,
+    normalize_external_military_label,
+    parse_external_military_xlsx,
     parse_label_text,
     stamp_pdf,
 )
@@ -44,6 +47,35 @@ def stamp_config(text: str, **overrides):
 def test_parse_label_text_keeps_ready_values_and_ignores_blank_lines():
     labels = parse_label_text("\ufeff 6528-2026 \r\n\n№ 6529-2026\nРег. 6604-2026")
     assert labels == ["6528-2026", "№ 6529-2026", "Рег. 6604-2026"]
+
+
+def test_parse_external_military_xlsx_filters_date_fragments(tmp_path):
+    path = tmp_path / "external.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet["A1"] = "от 27"
+    sheet["A2"] = "от 28"
+    sheet["B1"] = "ии6525"
+    sheet["B2"] = "ИИ-6526"
+    sheet["B3"] = "тт 1021"
+    sheet["D1"] = "кк2111"
+    sheet["D2"] = "жж93"
+    sheet["D3"] = "и8695-3"
+    workbook.save(path)
+
+    parsed = parse_external_military_xlsx(path)
+    columns = parsed["columns"]
+    selected = parse_external_military_xlsx(path, "B")
+
+    assert [column["column"] for column in columns] == ["B", "D"]
+    assert parsed["all_labels"] == ["ии6525", "ии-6526", "тт1021", "кк2111", "жж93", "и8695-3"]
+    assert selected["labels"] == ["ии6525", "ии-6526", "тт1021"]
+
+
+def test_external_military_normalization_keeps_short_and_compound_numbers():
+    assert normalize_external_military_label("жж86") == "жж86"
+    assert normalize_external_military_label("И 8695-3") == "и8695-3"
+    assert normalize_external_military_label("от 27") is None
 
 
 def test_parse_label_text_rejects_control_characters():

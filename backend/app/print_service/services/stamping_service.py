@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import re
 import shutil
 from collections import Counter
 from pathlib import Path
@@ -8,10 +9,20 @@ from typing import Any
 
 import fitz
 from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 
 
 MM_TO_POINT = 72 / 25.4
 MAX_LABEL_LENGTH = 100
+EXTERNAL_MILITARY_RE = re.compile(r"^([A-Za-zА-Яа-яЁё]{1,5})-?(\d+)(-\d+)?$")
+EXTERNAL_MILITARY_STOP_PREFIXES = {
+    "от",
+    "ген",
+    "пост",
+    "рц",
+    "смэ",
+    "рф",
+}
 
 
 class StampingValidationError(ValueError):
@@ -112,9 +123,10 @@ def parse_label_xlsx(path: Path, column: str | None = None) -> dict[str, Any]:
     sheet = workbook.active
     columns: list[dict[str, Any]] = []
     selected: list[str] = []
+    all_labels: list[str] = []
     selected_column = (column or "").strip().upper()
     for column_index in range(1, sheet.max_column + 1):
-        letter = sheet.cell(row=1, column=column_index).column_letter
+        letter = get_column_letter(column_index)
         values: list[str] = []
         for row_index in range(1, sheet.max_row + 1):
             value = sheet.cell(row=row_index, column=column_index).value
@@ -126,6 +138,7 @@ def parse_label_xlsx(path: Path, column: str | None = None) -> dict[str, Any]:
             validate_label(label)
             values.append(label)
         if values:
+            all_labels.extend(values)
             columns.append(
                 {
                     "column": letter,
@@ -138,7 +151,74 @@ def parse_label_xlsx(path: Path, column: str | None = None) -> dict[str, Any]:
             if letter == selected_column:
                 selected = values
     workbook.close()
-    return {"columns": columns, "selected_column": selected_column or None, "labels": selected}
+    return {
+        "columns": columns,
+        "selected_column": selected_column or None,
+        "labels": selected,
+        "all_labels": all_labels,
+        "column_count": len(columns),
+    }
+
+
+def normalize_external_military_label(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).replace("\ufeff", "").replace("\xa0", " ").strip()
+    if not text:
+        return None
+    text = text.replace("–", "-").replace("—", "-").replace("−", "-")
+    text = re.sub(r"\s+", "", text).lower()
+    match = EXTERNAL_MILITARY_RE.fullmatch(text)
+    if not match:
+        return None
+    prefix = match.group(1).lower().replace("ё", "е")
+    if prefix in EXTERNAL_MILITARY_STOP_PREFIXES:
+        return None
+    separator = "-" if "-" in text[: match.start(2)] else ""
+    tail = match.group(3) or ""
+    return f"{prefix}{separator}{match.group(2)}{tail}"
+
+
+def parse_external_military_xlsx(path: Path, column: str | None = None) -> dict[str, Any]:
+    try:
+        workbook = load_workbook(path, read_only=True, data_only=True)
+    except Exception as exc:
+        raise StampingValidationError("Не удалось прочитать Excel-файл с номерами № в в/ч №522") from exc
+    sheet = workbook.active
+    selected_column = (column or "").strip().upper()
+    values_by_column: list[list[str]] = [[] for _ in range(sheet.max_column)]
+    for row in sheet.iter_rows(values_only=True):
+        for column_index, value in enumerate(row):
+            label = normalize_external_military_label(value)
+            if label:
+                values_by_column[column_index].append(label)
+
+    columns: list[dict[str, Any]] = []
+    selected: list[str] = []
+    all_labels: list[str] = []
+    for column_index, values in enumerate(values_by_column, start=1):
+        letter = get_column_letter(column_index)
+        if values:
+            all_labels.extend(values)
+            columns.append(
+                {
+                    "column": letter,
+                    "count": len(values),
+                    "first": values[0],
+                    "last": values[-1],
+                    "labels": values if letter == selected_column else None,
+                }
+            )
+            if letter == selected_column:
+                selected = values
+    workbook.close()
+    return {
+        "columns": columns,
+        "selected_column": selected_column or None,
+        "labels": selected,
+        "all_labels": all_labels,
+        "column_count": len(columns),
+    }
 
 
 def validate_label(label: str) -> None:

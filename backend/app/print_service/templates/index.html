@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Порядок печати DOCX</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/print/static/styles.css?v=20260802-registration-stamp-style" />
+    <link rel="stylesheet" href="/print/static/styles.css?v=20260809-registration-preview-v2" />
   </head>
   <body class="{% if embedded %}embedded{% endif %}" data-can-edit="{% if can_edit %}1{% else %}0{% endif %}">
     <header class="app-header">
@@ -195,7 +195,7 @@
             <div class="panel-head compact">
               <div>
                 <h3>№ в в/ч №522</h3>
-                <p>Загрузите готовый список или вставьте номера. Список задаёт порядок DOCX, проверяет совпадения и заполняет объекты построчно.</p>
+                <p>Загрузите готовый список или вставьте номера. Excel читается по колонкам сверху вниз, а значения заполняют объекты построчно в текущем порядке DOCX.</p>
               </div>
               <div class="inline-actions">
                 <label class="file-button secondary">
@@ -211,7 +211,7 @@
             </div>
             <textarea id="registrationExternalInput" rows="5" spellcheck="false" placeholder="ии6525&#10;ии6526&#10;ии6527"></textarea>
             <div class="input-footer">
-              <span id="registrationExternalCount">0 номеров, fallback из имени DOCX</span>
+              <span id="registrationExternalCount">0 номеров</span>
             </div>
             <div id="registrationExternalWarnings" class="stamp-warnings"></div>
           </div>
@@ -331,17 +331,17 @@
         <div id="progressPanel" class="progress-panel" hidden>
           <p class="eyebrow">Шаг 4 из 4</p>
           <h2>Собираем PDF</h2>
-          <p>Можно закрыть вкладку — обработка продолжится.</p>
+          <p>Можно закрыть вкладку — задача продолжит выполняться на сервере.</p>
           <div class="progress-meter" aria-hidden="true">
             <div id="progressBar"></div>
           </div>
           <div id="progressText" class="progress-text" aria-live="polite">Запускаем сборку…</div>
           <div id="progressDetails" class="progress-details"></div>
           <ol class="process-steps" aria-label="Этапы сборки">
-            <li class="done">Проверка файлов</li>
-            <li class="active">Преобразование документов</li>
-            <li>Сборка итогового PDF</li>
-            <li>Подготовка скачивания</li>
+            <li id="pipelineCheck" class="done">Проверка файлов</li>
+            <li id="pipelineConvert" class="active">Преобразование документов</li>
+            <li id="pipelineMerge">Сборка итогового PDF</li>
+            <li id="pipelineDownload">Подготовка скачивания</li>
           </ol>
         </div>
 
@@ -395,6 +395,6 @@
       </form>
     </dialog>
 
-    <script src="/print/static/app.js?v=20260802-registration-stamp-style"></script>
+    <script src="/print/static/app.js?v=20260809-registration-preview-v2"></script>
   </body>
 </html>

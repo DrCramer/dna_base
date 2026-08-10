@@ -3,6 +3,7 @@ import { BarChart3, Download, ExternalLink, FilterX } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import type { PartyControlReportRow, PeriodStatisticsRow, ReportPartyRow, User } from '../api/types'
+import { EmptyState, LoadingState, MultiPartyPicker, PageHeader } from '../components/ui'
 
 type ReportsTab = 'overview' | 'control' | 'progress' | 'statistics' | 'performers'
 type StatsMode = 'weekly' | 'monthly' | 'yearly'
@@ -99,8 +100,7 @@ function statusClass(status: string) {
 
 function percentClass(percent: number) {
   if (percent >= 100) return 'report-progress good'
-  if (percent >= 50) return 'report-progress warning'
-  if (percent > 0) return 'report-progress danger'
+  if (percent > 0) return 'report-progress warning'
   return 'report-progress muted'
 }
 
@@ -200,15 +200,15 @@ export function ReportsPage({ user, onPartyOpen }: { user: User; onPartyOpen: (p
 
   return (
     <div className="page reports-page">
-      <header className="page-header">
-        <div>
-          <h1>Отчёты</h1>
-          <p className="muted-note">Управленческая сводка по партиям, контролю и ходу лабораторной работы.</p>
-        </div>
-        <a className="icon-button" href={api.reportExportUrl(exportReport, queryFilters)}>
-          <Download size={18} />Экспорт
-        </a>
-      </header>
+      <PageHeader
+        title="Отчёты"
+        description="Управленческая сводка по партиям, контролю и ходу лабораторной работы."
+        actions={(
+          <a className="icon-button" href={api.reportExportUrl(exportReport, queryFilters)}>
+            <Download size={18} />Экспорт
+          </a>
+        )}
+      />
 
       <section className="section reports-filter-panel">
         <div className="reports-filter-grid">
@@ -241,18 +241,13 @@ export function ReportsPage({ user, onPartyOpen }: { user: User; onPartyOpen: (p
                 <input type="date" value={filters.date_to} onChange={(event) => updateFilter('date_to', event.target.value)} />
               </label>
               <label>Партии
-                <select
-                  multiple
-                  value={Array.from(selectedPartyIds).map(String)}
-                  onChange={(event) => {
-                    const values = Array.from(event.currentTarget.selectedOptions).map((option) => option.value)
-                    updateFilter('party_ids', values.join(','))
-                  }}
-                >
-                  {(parties.data?.items ?? []).map((party) => (
-                    <option key={party.id} value={party.id}>№ {party.party_no} · {party.object_count}</option>
-                  ))}
-                </select>
+                <MultiPartyPicker
+                  parties={parties.data?.items ?? []}
+                  selectedIds={Array.from(selectedPartyIds)}
+                  onChange={(ids) => updateFilter('party_ids', ids.join(','))}
+                  disabled={parties.isLoading}
+                  title="Партии отчёта"
+                />
               </label>
               <label>Этап
                 <select value={filters.stage_type} onChange={(event) => updateFilter('stage_type', event.target.value)}>
@@ -292,7 +287,7 @@ export function ReportsPage({ user, onPartyOpen }: { user: User; onPartyOpen: (p
 
       {tab === 'overview' && (
         <section className="section">
-          {overview.isLoading ? <div className="loading">Загрузка...</div> : (
+          {overview.isLoading ? <LoadingState title="Загрузка обзора..." rows={6} /> : (
             <>
               <div className="report-kpi-groups">
                 {kpiGroups.map(([group, keys]) => (
@@ -330,7 +325,7 @@ export function ReportsPage({ user, onPartyOpen }: { user: User; onPartyOpen: (p
               ['empty_control', 'Без заполненного контроля']
             ].map(([key, label]) => <button key={key} className={filters.quick === key ? 'active' : ''} onClick={() => updateFilter('quick', key)}>{label}</button>)}
           </div>
-          {control.isLoading ? <div className="loading">Загрузка...</div> : <ControlTable rows={control.data?.items ?? []} onPartyOpen={onPartyOpen} />}
+          {control.isLoading ? <LoadingState title="Загрузка контроля партий..." rows={7} /> : <ControlTable rows={control.data?.items ?? []} onPartyOpen={onPartyOpen} />}
         </section>
       )}
 
@@ -352,7 +347,7 @@ export function ReportsPage({ user, onPartyOpen }: { user: User; onPartyOpen: (p
               ['burnt_bone', 'Горелая кость']
             ].map(([key, label]) => <button key={key} className={filters.quick === key ? 'active' : ''} onClick={() => updateFilter('quick', key)}>{label}</button>)}
           </div>
-          {progress.isLoading ? <div className="loading">Загрузка...</div> : <PartyProgressTable rows={progress.data?.items ?? []} onPartyOpen={onPartyOpen} />}
+          {progress.isLoading ? <LoadingState title="Загрузка хода работы..." rows={7} /> : <PartyProgressTable rows={progress.data?.items ?? []} onPartyOpen={onPartyOpen} />}
         </section>
       )}
 
@@ -363,28 +358,33 @@ export function ReportsPage({ user, onPartyOpen }: { user: User; onPartyOpen: (p
             <button className={statsMode === 'monthly' ? 'active' : ''} onClick={() => setStatsMode('monthly')}>По месяцам</button>
             <button className={statsMode === 'yearly' ? 'active' : ''} onClick={() => setStatsMode('yearly')}>По годам</button>
           </div>
-          {statistics.isLoading ? <div className="loading">Загрузка...</div> : <StatisticsTable rows={statistics.data?.items ?? []} mode={statsMode} />}
+          {statistics.isLoading ? <LoadingState title="Загрузка статистики..." rows={6} /> : <StatisticsTable rows={statistics.data?.items ?? []} mode={statsMode} />}
         </section>
       )}
 
       {tab === 'performers' && (
         <section className="section">
-          <div className="alert">Вкладка подготовлена для следующего расширения отчётов по нагрузке сотрудников.</div>
-          <div className="report-table-wrap">
-            <table className="report-table">
-              <thead><tr><th>Исполнитель</th><th>Роль</th>{stageColumns.map(([, label]) => <th key={label}>{label}</th>)}<th>Всего действий</th></tr></thead>
-              <tbody>
-                {(performers.data?.items ?? []).map((row) => (
-                  <tr key={`${row.employee}-${row.role}`}>
-                    <td>{row.employee}</td>
-                    <td>{row.role}</td>
-                    {stageColumns.map(([stage]) => <td key={stage}>{row.stage_counts?.[stage] ?? 0}</td>)}
-                    <td><strong>{row.total_actions}</strong></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {performers.isLoading ? <LoadingState title="Загрузка статистики исполнителей..." rows={6} /> : (performers.data?.items ?? []).length ? (
+            <div className="report-table-wrap">
+              <table className="report-table">
+                <thead><tr><th>Исполнитель</th><th>Роль</th>{stageColumns.map(([, label]) => <th key={label}>{label}</th>)}<th>Всего действий</th></tr></thead>
+                <tbody>
+                  {(performers.data?.items ?? []).map((row) => (
+                    <tr key={`${row.employee}-${row.role}`}>
+                      <td>{row.employee}</td>
+                      <td>{row.role}</td>
+                      {stageColumns.map(([stage]) => <td key={stage}>{row.stage_counts?.[stage] ?? 0}</td>)}
+                      <td><strong>{row.total_actions}</strong></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <EmptyState title="Статистика исполнителей пока недоступна">
+              Здесь появится распределение выполненных этапов и нагрузки по сотрудникам за выбранный период.
+            </EmptyState>
+          )}
         </section>
       )}
     </div>

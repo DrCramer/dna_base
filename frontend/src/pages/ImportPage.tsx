@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Search, Upload, X } from 'lucide-react'
+import { Check, Search, X } from 'lucide-react'
 import { Fragment, useEffect, useState } from 'react'
 import { api } from '../api/client'
-import type { CommitResponse, ElectrophoresisPdfPreview, Party, RegistryPreview, RtCommitResponse, RtPreview } from '../api/types'
-import { PageHeader } from '../components/ui'
+import type { CommitResponse, ElectrophoresisPdfPreview, RegistryPreview, RtCommitResponse, RtPreview } from '../api/types'
+import { FileDropzone, MultiPartyPicker, PageHeader } from '../components/ui'
 
 type RegistryImportStatus = 'pending' | 'previewing' | 'ready' | 'blocked' | 'committing' | 'done' | 'error'
 type RegistryImportPhase = 'idle' | 'previewing' | 'committing' | 'done'
@@ -369,7 +369,7 @@ export function RegistryImportPage() {
     setRun((prev) => ({ ...prev, phase: 'idle', currentIndex: 0, totalToCommit: 0, currentFilename: '' }))
   }
 
-  function handleFiles(fileList: FileList | null) {
+  function handleFiles(fileList: FileList | File[] | null) {
     if (!fileList?.length) return
     const known = new Set(items.map((item) => item.fingerprint))
     const unique: File[] = []
@@ -462,19 +462,14 @@ export function RegistryImportPage() {
         warnings={['дубликаты внутри файла блокируются', 'объекты из другой партии не переносятся', 'замена затрагивает только registry_excel']}
       />
       <section className="upload-panel">
-        <label className="file-drop">
-          <Upload size={22} />
-          <span>Выберите один или несколько .xlsx/.xls реестров</span>
-          <input
-            type="file"
-            accept=".xlsx,.xls"
-            multiple
-            onChange={(event) => {
-              handleFiles(event.target.files)
-              event.currentTarget.value = ''
-            }}
-          />
-        </label>
+        <FileDropzone
+          title="Перетащите Excel-реестры сюда"
+          description="или нажмите для выбора одного или нескольких файлов"
+          formats=".xlsx, .xls"
+          accept=".xlsx,.xls"
+          multiple
+          onFiles={handleFiles}
+        />
         {notice && <div className="alert">{notice}</div>}
       </section>
       <RecentImports />
@@ -720,7 +715,7 @@ export function RtImportPage() {
     setRun((prev) => ({ ...prev, phase: 'idle', currentIndex: 0, totalToCommit: 0, currentFilename: '' }))
   }
 
-  function handleRtFiles(fileList: FileList | null) {
+  function handleRtFiles(fileList: FileList | File[] | null) {
     if (!fileList?.length) return
     const known = new Set(items.map((item) => item.fingerprint))
     const unique: File[] = []
@@ -813,19 +808,14 @@ export function RtImportPage() {
         warnings={['без выбора режима старые RT-данные не перезаписываются', 'не найденные номера остаются в отчёте', 'пакет импортируется последовательно']}
       />
       <section className="upload-panel">
-        <label className="file-drop">
-          <Upload size={22} />
-          <span>Выберите один или несколько Excel файлов RealTime: Abs Quant или TRIO</span>
-          <input
-            type="file"
-            accept=".xls,.xlsx"
-            multiple
-            onChange={(event) => {
-              handleRtFiles(event.target.files)
-              event.currentTarget.value = ''
-            }}
-          />
-        </label>
+        <FileDropzone
+          title="Перетащите файлы RealTime / qPCR сюда"
+          description="или нажмите для выбора Abs Quant или TRIO"
+          formats=".xlsx, .xls"
+          accept=".xls,.xlsx"
+          multiple
+          onFiles={handleRtFiles}
+        />
         {notice && <div className="alert">{notice}</div>}
       </section>
       <RecentImports />
@@ -963,8 +953,8 @@ export function RtImportPage() {
           </div>
         </section>
       )}
-      <section className="section">
-        <h2>Служебная проверка номеров РЦСМЭ</h2>
+      <details className="section service-tools">
+        <summary><strong>Служебные инструменты</strong><span>Проверка номеров РЦСМЭ</span></summary>
         <div className="toolbar-actions">
           <button className="icon-button" onClick={() => fixPreview.mutate()} disabled={fixPreview.isPending}>Проверить</button>
           <button className="primary compact" onClick={() => fixApply.mutate()} disabled={fixApply.isPending || !fixPreview.data?.total}><Check size={18} />Исправить безопасные</button>
@@ -976,7 +966,7 @@ export function RtImportPage() {
         )}
         {fixMessage && <div className="alert success">{fixMessage}</div>}
         {(fixPreview.error || fixApply.error) && <div className="alert error">{errorMessage(fixPreview.error || fixApply.error)}</div>}
-      </section>
+      </details>
     </div>
   )
 }
@@ -1083,8 +1073,6 @@ export function ElectrophoresisImportPage() {
   const [performer, setPerformer] = useState('')
   const [selectedYear, setSelectedYear] = useState('')
   const [selectedControlPartyIds, setSelectedControlPartyIds] = useState<string[]>([])
-  const [partyPickerOpen, setPartyPickerOpen] = useState(false)
-  const [partyPickerSearch, setPartyPickerSearch] = useState('')
   const [message, setMessage] = useState('')
   const [previewError, setPreviewError] = useState('')
   const [previewProgress, setPreviewProgress] = useState<{ current: number; total: number; filename: string } | null>(null)
@@ -1102,11 +1090,6 @@ export function ElectrophoresisImportPage() {
     ? selectedControlParties.map((party) => party.party_no).join(', ')
     : 'не выбраны'
   const availableControlParties = parties.data?.items || []
-  const filteredControlParties = availableControlParties.filter((party) => {
-    const needle = partyPickerSearch.trim().toLowerCase()
-    if (!needle) return true
-    return `${party.party_no} ${party.object_count} ${party.case_year || ''}`.toLowerCase().includes(needle)
-  })
   const uploadPdf = useMutation({
     mutationFn: ({ files, caseYear, partyIds }: { files: File[]; caseYear: number; partyIds: number[] }) =>
       api.previewElectrophoresisPdf(files, caseYear, partyIds)
@@ -1151,15 +1134,6 @@ export function ElectrophoresisImportPage() {
   function setControlParties(nextIds: string[]) {
     setSelectedControlPartyIds(nextIds)
     clearPdfPreview()
-  }
-
-  function toggleControlParty(party: Party) {
-    const value = String(party.id)
-    setControlParties(
-      selectedControlPartyIds.includes(value)
-        ? selectedControlPartyIds.filter((item) => item !== value)
-        : [...selectedControlPartyIds, value]
-    )
   }
 
   async function previewPdfFiles(files: File[]) {
@@ -1232,34 +1206,25 @@ export function ElectrophoresisImportPage() {
             </select>
           </label>
           <label>Партии для контролей
-            <button
-              type="button"
-              className="cell-picker-button control-party-picker-button"
-              onClick={() => setPartyPickerOpen(true)}
+            <MultiPartyPicker
+              parties={availableControlParties}
+              selectedIds={controlPartyIds}
+              onChange={(ids) => setControlParties(ids.map(String))}
               disabled={!selectedYear || commitPdf.isPending}
-            >
-              {selectedControlParties.length ? `Выбрано партий: ${selectedControlParties.length}` : 'Выбрать партии'}
-            </button>
-            {selectedControlParties.length > 0 && (
-              <span className="control-party-summary" title={selectedControlPartyLabel}>{selectedControlPartyLabel}</span>
-            )}
+              title="Партии для контролей"
+            />
             <span className="field-hint">Используется только для К+, К-, PC, NC. Можно выбрать несколько.</span>
           </label>
         </div>
-        <label className={`file-drop${!selectedYear ? ' is-disabled' : ''}`}>
-          <Upload size={22} />
-          <span>PDF файлы электрофореза</span>
-          <input
-            type="file"
-            accept=".pdf,application/pdf"
-            multiple
-            disabled={!selectedYear}
-            onChange={(event) => {
-              if (event.target.files?.length) void previewPdfFiles(Array.from(event.target.files))
-              event.currentTarget.value = ''
-            }}
-          />
-        </label>
+        <FileDropzone
+          title="Перетащите PDF фореза сюда"
+          description="или нажмите для выбора нескольких файлов"
+          formats=".pdf"
+          accept=".pdf,application/pdf"
+          multiple
+          disabled={!selectedYear}
+          onFiles={(files) => void previewPdfFiles(files)}
+        />
       </section>
       <RecentImports />
       {previewProgress && (
@@ -1344,39 +1309,6 @@ export function ElectrophoresisImportPage() {
           {message && <div className="alert success">{message}</div>}
           {commitPdf.error && <div className="alert error">{errorMessage(commitPdf.error)}</div>}
         </section>
-      )}
-      {partyPickerOpen && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setPartyPickerOpen(false)}>
-          <div className="modal compact-modal control-party-picker-modal" role="dialog" aria-modal="true" aria-label="Выбрать партии для контролей" onMouseDown={(event) => event.stopPropagation()}>
-            <h2>Партии для контролей</h2>
-            <div className="searchbox compact-search">
-              <Search size={16} />
-              <input autoFocus value={partyPickerSearch} onChange={(event) => setPartyPickerSearch(event.target.value)} placeholder="Поиск партии" />
-            </div>
-            <div className="control-party-picker-toolbar">
-              <button type="button" className="tiny-button" onClick={() => setControlParties(Array.from(new Set([...selectedControlPartyIds, ...filteredControlParties.map((party) => String(party.id))])))}>Выбрать видимые</button>
-              <button type="button" className="tiny-button" onClick={() => setControlParties([])}>Очистить</button>
-              <span>{selectedControlParties.length} выбрано</span>
-            </div>
-            <div className="check-list compact-check-list control-party-check-list">
-              {filteredControlParties.map((party) => {
-                const checked = selectedControlPartyIds.includes(String(party.id))
-                return (
-                  <label key={party.id}>
-                    <input type="checkbox" checked={checked} onChange={() => toggleControlParty(party)} />
-                    <span>{party.party_no}</span>
-                    <em>{party.object_count} объектов</em>
-                  </label>
-                )
-              })}
-              {!filteredControlParties.length && <div className="empty">Партии не найдены</div>}
-            </div>
-            <div className="modal-actions">
-              <button type="button" className="icon-button" onClick={() => setPartyPickerOpen(false)}>Закрыть</button>
-              <button type="button" className="primary compact" onClick={() => setPartyPickerOpen(false)}><Check size={18} />Готово</button>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   )

@@ -150,7 +150,7 @@ export function EmployeesPage({ user }: { user: User }) {
           <div className="section-head">
             <div>
               <h2>Сотрудники</h2>
-              <p>{employees.data?.length ?? 0} в текущем списке</p>
+              <p>{employees.isLoading ? 'Загрузка...' : `${employees.data?.length ?? 0} сотрудников`}</p>
             </div>
           </div>
           <div className="toolbar">

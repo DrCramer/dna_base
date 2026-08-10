@@ -1,5 +1,7 @@
 from pathlib import Path
 from types import SimpleNamespace
+from zipfile import ZipFile
+from io import BytesIO
 
 import fitz
 import pytest
@@ -51,6 +53,28 @@ def test_upload_without_docx_is_rejected(client):
     assert response.status_code == 400
 
 
+def test_job_upload_persists_external_military_excel(client):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet["A1"] = "ии8828"
+    sheet["A2"] = "ии6305"
+    buffer = BytesIO()
+    workbook.save(buffer)
+
+    response = client.post(
+        "/api/print/jobs",
+        files=[
+            ("files", ("first.docx", b"docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+            ("files", ("общий список.xlsx", buffer.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")),
+        ],
+    )
+
+    assert response.status_code == 200
+    assert response.json()["registration_external_excel"]["all_labels"] == ["ии8828", "ии6305"]
+    state = main.load_state(response.json()["id"])
+    assert state["registration_external_numbers"] == ["ии8828", "ии6305"]
+
+
 def test_validate_matching_error(client):
     upload = upload_docx(client, "Акт_ее5968.docx")
     job_id = upload.json()["id"]
@@ -92,6 +116,82 @@ def test_full_success_flow_with_mocked_conversion(client, monkeypatch):
     assert client.get(f"/api/print/jobs/{job_id}/download/pdf").status_code == 200
     assert client.get(f"/api/print/jobs/{job_id}/download/report.csv").status_code == 200
     assert client.delete(f"/api/print/jobs/{job_id}").status_code == 200
+
+
+def test_registration_build_creates_party_named_pdfs(client, monkeypatch):
+    async def fake_convert_entries(entries, documents, job_dir, settings, progress_callback=None):
+        pdf_paths = []
+        for entry in entries:
+            path = Path(job_dir) / "converted" / f"{entry['doc_id']}.pdf"
+            writer = PdfWriter()
+            writer.add_blank_page(width=595, height=842)
+            with path.open("wb") as handle:
+                writer.write(handle)
+            entry["conversion_status"] = "Готов"
+            entry["pages"] = 1
+            entry["page_size"] = "210.0 × 297.0 мм · A4, книжная"
+            entry["pdf_path"] = str(path.relative_to(job_dir))
+            entry["pdf_analysis"] = {
+                "page_count": 1,
+                "pages": [{"width_mm": 210.0, "height_mm": 297.0, "rotate": 0}],
+                "empty_pages": [],
+            }
+            pdf_paths.append(path)
+        return entries, pdf_paths
+
+    monkeypatch.setattr(main, "convert_entries", fake_convert_entries)
+    upload = client.post(
+        "/api/print/jobs",
+        files=[
+            ("files", ("first.docx", b"first", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+            ("files", ("last.docx", b"last", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+        ],
+    )
+    job_id = upload.json()["id"]
+    documents = upload.json()["documents"]
+    state = main.load_state(job_id)
+    state["status"] = "validated"
+    state["validation"] = {
+        "mode": "registration",
+        "can_build": True,
+        "entries": [
+            {
+                "order": 1,
+                "doc_id": documents[0]["id"],
+                "party_no": "194",
+                "external_military_no": "ии8828",
+                "rcsme_reg_no": "6406-1",
+                "status": "Готов",
+                "blocking": False,
+                "warnings": [],
+                "error": "",
+            },
+            {
+                "order": 2,
+                "doc_id": documents[1]["id"],
+                "party_no": "194",
+                "external_military_no": "ии6305",
+                "rcsme_reg_no": "6505-1",
+                "status": "Готов",
+                "blocking": False,
+                "warnings": [],
+                "error": "",
+            },
+        ],
+        "stamping": {"config": {"enabled": False}},
+    }
+    main.save_state(job_id, state)
+
+    build = client.post(f"/api/print/jobs/{job_id}/build?wait=true")
+
+    assert build.status_code == 200
+    assert build.json()["mode"] == "registration"
+    assert build.json()["result_pdfs"][0]["download_name"] == "194_ии8828-ии6305.pdf"
+    zip_path = main.get_job_dir(job_id) / "result" / "registration-parties.zip"
+    with ZipFile(zip_path) as archive:
+        assert "194_ии8828-ии6305.pdf" in archive.namelist()
+        assert "report.csv" not in archive.namelist()
+    assert main.load_state(job_id)["report_csv"] is None
 
 
 def test_full_success_flow_with_stamping(client, monkeypatch):

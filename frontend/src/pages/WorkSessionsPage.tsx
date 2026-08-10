@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Eye, Search, Upload, X } from 'lucide-react'
+import { Check, Eye, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import type { Employee, ReferenceItem, RegistrationListPreview, StageEventsPreviewRequest, StageTableRow, User, WorkProtocolObjectRow, WorkProtocolPlateCell, WorkProtocolPreview, WorkProtocolStageBlock } from '../api/types'
-import { PageHeader } from '../components/ui'
+import { FileDropzone, PageHeader } from '../components/ui'
 
 type DraftValue = string | number | string[] | null
 type StageFieldConfig = { key: string; label: string; type?: string; performerRole?: string }
@@ -668,22 +668,20 @@ export function WorkSessionsPage({ user }: { user: User }) {
       {mode === 'registration-list' && <section className="section registration-list-import">
         <h2>Импорт общего списка</h2>
         <div className="registration-list-layout">
-          <label className="file-drop registration-list-drop">
-            <Upload size={22} />
-            <span>{registrationListFile ? registrationListFile.name : 'Excel общий список .xlsx'}</span>
-            <input
-              type="file"
-              accept=".xlsx"
-              disabled={!canEdit}
-              onChange={(event) => {
-                const file = event.target.files?.[0] || null
-                setRegistrationListFile(file)
-                setRegistrationListPreview(null)
-                setRegistrationListMessage('')
-                setRegistrationListMode('block')
-              }}
-            />
-          </label>
+          <FileDropzone
+            title={registrationListFile ? registrationListFile.name : 'Перетащите общий список сюда'}
+            description="или нажмите для выбора Excel-файла"
+            formats=".xlsx"
+            accept=".xlsx"
+            disabled={!canEdit}
+            className="registration-list-drop"
+            onFiles={(files) => {
+              setRegistrationListFile(files[0] || null)
+              setRegistrationListPreview(null)
+              setRegistrationListMessage('')
+              setRegistrationListMode('block')
+            }}
+          />
           <div className="form-grid flat registration-list-form">
             <label>Стартовая партия
               <input value={registrationListForm.start_party_no} onChange={(event) => setRegistrationListField('start_party_no', event.target.value)} placeholder="181" />
@@ -847,11 +845,14 @@ export function WorkSessionsPage({ user }: { user: User }) {
 
       {mode === 'protocol' && <section className="section">
         <h2>Импорт протокола плашки</h2>
-        <label className="file-drop">
-          <Upload size={22} />
-          <span>Excel протокол плашки .xlsx</span>
-          <input type="file" accept=".xlsx" disabled={!canEdit} onChange={(event) => event.target.files?.[0] && uploadProtocol.mutate(event.target.files[0])} />
-        </label>
+        <FileDropzone
+          title="Перетащите Excel-протокол сюда"
+          description="или нажмите для выбора протокола плашки"
+          formats=".xlsx"
+          accept=".xlsx"
+          disabled={!canEdit}
+          onFiles={(files) => files[0] && uploadProtocol.mutate(files[0])}
+        />
         {uploadProtocol.error && <div className="alert error">{errorMessage(uploadProtocol.error)}</div>}
         {protocolPreview && (
           <div className="protocol-preview">

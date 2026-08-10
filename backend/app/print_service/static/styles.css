@@ -632,8 +632,14 @@ h3 {
   max-height: 280px;
 }
 
-.registration-preview-table.compact {
-  max-height: 230px;
+.registration-party-summary td {
+  background: color-mix(in srgb, var(--panel-soft) 88%, var(--accent) 12%);
+  font-weight: 600;
+}
+
+.registration-object-row td:first-child {
+  padding-left: 22px;
+  color: var(--muted);
 }
 
 .panel-head {

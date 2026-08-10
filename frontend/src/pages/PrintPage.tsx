@@ -9,6 +9,8 @@ type PrintJob = {
   updated_at?: string
   total?: number
   pdfs?: unknown[]
+  result_pdf?: string | null
+  result_zip?: string | null
   build?: {
     done?: number
     total?: number
@@ -59,7 +61,7 @@ export function PrintPage() {
               <RefreshCw size={18} />
               Обновить
             </button>
-            <a className="primary download" href="/print?embedded=1" target="_blank" rel="noreferrer">
+            <a className="primary download" href="/print?embedded=1&v=20260809-registration-preview-v2" target="_blank" rel="noreferrer">
               <ExternalLink size={18} />
               Открыть отдельно
             </a>
@@ -89,14 +91,18 @@ export function PrintPage() {
           <div className="print-status-actions">
             {hasReadyResult ? (
               <>
-                <a className="download" href={`/api/print/jobs/${job.id}/download/pdf`}>
-                  <Download size={16} />
-                  PDF
-                </a>
-                <a className="download" href={`/api/print/jobs/${job.id}/download/zip`}>
-                  <Download size={16} />
-                  ZIP
-                </a>
+                {job.result_pdf ? (
+                  <a className="icon-button" href={`/api/print/jobs/${job.id}/download/pdf`}>
+                    <Download size={16} />
+                    PDF
+                  </a>
+                ) : null}
+                {job.result_zip ? (
+                  <a className="icon-button" href={`/api/print/jobs/${job.id}/download/zip`}>
+                    <Download size={16} />
+                    ZIP
+                  </a>
+                ) : null}
                 <a className="icon-button" href={`/api/print/jobs/${job.id}/download/report.csv`}>
                   <FileText size={16} />
                   CSV
@@ -111,7 +117,7 @@ export function PrintPage() {
       <div className="print-frame-wrap">
         <iframe
           title="Печать DOCX"
-          src="/print?embedded=1"
+          src="/print?embedded=1&v=20260809-registration-preview-v2"
           className="print-frame"
         />
       </div>

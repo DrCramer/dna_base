@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { api } from '../api/client'
 import type { DashboardPartyProgress } from '../api/types'
-import { LoadingState, PageHeader } from '../components/ui'
+import { LoadingState, PageHeader, ProgressCell } from '../components/ui'
 
 const stageColumns = [
   ['sample_prep', 'Пробоподготовка'],
@@ -93,12 +93,12 @@ export function DashboardPage({
       />
 
       <div className="metrics dashboard-kpi">
-        <div><span>Всего объектов</span><strong>{data?.total_objects ?? 0}</strong></div>
-        <div><span>Активных партий</span><strong>{data?.active_parties ?? 0}</strong></div>
-        <div><span>Проблемных партий</span><strong>{problemParties}</strong></div>
-        <div><span>Без анализа</span><strong>{withoutAnalysis}</strong></div>
-        <div><span>Без ПЦР</span><strong>{withoutPcr}</strong></div>
-        <div><span>С контрольными замечаниями</span><strong>{partiesWithControl.length}</strong></div>
+        <div className="kpi-general"><span>Всего объектов</span><strong>{data?.total_objects ?? 0}</strong></div>
+        <div className="kpi-general"><span>Активных партий</span><strong>{data?.active_parties ?? 0}</strong></div>
+        <div className="kpi-danger"><span>Проблемных партий</span><strong>{problemParties}</strong></div>
+        <div className="kpi-warning"><span>Без анализа</span><strong>{withoutAnalysis}</strong></div>
+        <div className="kpi-warning"><span>Без ПЦР</span><strong>{withoutPcr}</strong></div>
+        <div className="kpi-danger"><span>С контрольными замечаниями</span><strong>{partiesWithControl.length}</strong></div>
       </div>
 
       <section className="section">
@@ -144,11 +144,8 @@ export function DashboardPage({
                     const done = party.stage_counts[key] ?? 0
                     const percent = stagePercent(party, key)
                     return (
-                      <div className={lagging.has(key) ? 'dashboard-lagging-cell' : ''} role="cell" key={key}>
-                        <span className={`mini-progress ${percent === 100 ? 'good' : percent ? 'warning' : 'danger'}`}>
-                          <i style={{ width: `${percent}%` }} />
-                        </span>
-                        {done} / {party.object_count}
+                      <div className={lagging.has(key) && percent > 0 ? 'dashboard-lagging-cell' : ''} role="cell" key={key}>
+                        <ProgressCell done={done} total={party.object_count} />
                       </div>
                     )
                   })}

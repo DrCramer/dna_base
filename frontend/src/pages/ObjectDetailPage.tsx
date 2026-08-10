@@ -3,6 +3,7 @@ import { ArrowLeft, Save } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import type { RegistryObject, StageEvent, User } from '../api/types'
+import { EmptyState, ErrorState, LoadingState } from '../components/ui'
 
 const tabs = ['Обзор', 'Регистрация', 'Пробоподготовка', 'Измельчение', 'Выделение', 'RealTime', 'ПЦР', 'Электрофорез', 'Анализ', 'Файлы', 'История']
 
@@ -78,8 +79,8 @@ function value(text: string | number | null | undefined) {
   return text || '—'
 }
 
-function EmptyStage() {
-  return <div className="empty">Нет данных</div>
+function EmptyStage({ title = 'Нет записей этапа', description = 'Для этого объекта данные ещё не добавлены.' }: { title?: string; description?: string }) {
+  return <EmptyState title={title}>{description}</EmptyState>
 }
 
 function performerText(event: StageEvent) {
@@ -171,17 +172,19 @@ export function ObjectDetailPage({
   onPartyOpen: (partyNo: string) => void
 }) {
   const queryClient = useQueryClient()
-  const { data } = useQuery({ queryKey: ['object', id], queryFn: () => api.object(id) })
+  const { data, isLoading, isError, error, refetch } = useQuery({ queryKey: ['object', id], queryFn: () => api.object(id) })
   const [form, setForm] = useState<Partial<RegistryObject>>({})
   const [tab, setTab] = useState(tabs[0])
   const canEdit = user.role !== 'viewer'
   const events = useMemo(() => [...(data?.stage_events ?? [])].sort((a, b) => (b.event_date || '').localeCompare(a.event_date || '') || b.id - a.id), [data])
   useEffect(() => { if (data) setForm(editableFields(data)) }, [data])
+  const isDirty = useMemo(() => data ? JSON.stringify(form) !== JSON.stringify(editableFields(data)) : false, [data, form])
   const save = useMutation({
     mutationFn: () => api.updateObject(id, form),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['object', id] })
   })
-  if (!data) return <div className="page"><button className="icon-button" onClick={onBack}><ArrowLeft size={18} />Назад</button><div className="loading">Загрузка...</div></div>
+  if (isLoading) return <div className="page"><button className="icon-button page-back-button" onClick={onBack}><ArrowLeft size={18} />Назад</button><LoadingState title="Загрузка карточки объекта..." rows={6} /></div>
+  if (isError || !data) return <div className="page"><button className="icon-button page-back-button" onClick={onBack}><ArrowLeft size={18} />Назад</button><ErrorState error={error} onRetry={() => void refetch()} /></div>
   function setField(key: keyof RegistryObject, nextValue: string) {
     setForm((prev) => ({ ...prev, [key]: nextValue || null }))
   }
@@ -191,7 +194,7 @@ export function ObjectDetailPage({
       <header className="page-header">
         <button className="icon-button" onClick={onBack}><ArrowLeft size={18} />Назад</button>
         <h1>{data.rcsme_reg_no || data.decree_no || `Объект ${data.id}`}</h1>
-        {canEdit && <button className="primary compact" onClick={() => save.mutate()}><Save size={18} />Сохранить</button>}
+        {canEdit && <button className="primary compact" disabled={!isDirty || save.isPending} onClick={() => save.mutate()}><Save size={18} />{save.isPending ? 'Сохранение...' : 'Сохранить'}</button>}
       </header>
       <div className="tabs">{tabs.map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}</button>)}</div>
       {tab === 'Обзор' ? (
@@ -211,7 +214,7 @@ export function ObjectDetailPage({
                 <em>{performerText(event)}</em>
               </div>
             ))}
-            {!events.length && <EmptyStage />}
+            {!events.length && <EmptyStage title="История работы пока отсутствует" description="События этапов появятся здесь после первого заполнения." />}
           </div>
         </section>
       ) : tab === 'Регистрация' ? (
@@ -343,20 +346,22 @@ export function ObjectDetailPage({
       ) : tab === 'Файлы' ? (
         <section className="section">
           <h2>Файлы</h2>
-          <StageTable
-            columns={['Файл', 'Тип', 'Дата загрузки', 'Образец']}
-            rows={(data.electrophoresis_result_files || []).map((file) => [
-              file.filename,
-              file.file_type,
-              file.uploaded_at?.slice(0, 10),
-              String(file.raw_json?.sample_name_raw || file.raw_json?.sample_object_no || '')
-            ])}
-          />
+          {(data.electrophoresis_result_files || []).length ? (
+            <StageTable
+              columns={['Файл', 'Тип', 'Дата загрузки', 'Образец']}
+              rows={(data.electrophoresis_result_files || []).map((file) => [
+                file.filename,
+                file.file_type,
+                file.uploaded_at?.slice(0, 10),
+                String(file.raw_json?.sample_name_raw || file.raw_json?.sample_object_no || '')
+              ])}
+            />
+          ) : <EmptyStage title="Файлы пока не добавлены" description="PDF фореза и связанные файлы появятся здесь после импорта." />}
         </section>
       ) : (
         <section className="section">
           <h2>{tab}</h2>
-          <EmptyStage />
+          <EmptyStage title="История изменений пока отсутствует" description="Аудит действий появится здесь, когда для объекта будут сохранены изменения." />
         </section>
       )}
     </div>

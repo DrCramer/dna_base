@@ -45,6 +45,8 @@ const state = {
   connectionLost: false,
   stampingHydratedForJob: null,
   stampPreviewUrl: null,
+  registrationExternalLoadedFileKey: null,
+  registrationExpandedPartyNo: null,
 };
 
 const els = {
@@ -158,6 +160,10 @@ const els = {
   progressBar: document.querySelector("#progressBar"),
   progressText: document.querySelector("#progressText"),
   progressDetails: document.querySelector("#progressDetails"),
+  pipelineCheck: document.querySelector("#pipelineCheck"),
+  pipelineConvert: document.querySelector("#pipelineConvert"),
+  pipelineMerge: document.querySelector("#pipelineMerge"),
+  pipelineDownload: document.querySelector("#pipelineDownload"),
   resultTitle: document.querySelector("#resultTitle"),
   resultMetrics: document.querySelector("#resultMetrics"),
   resultBlock: document.querySelector("#resultBlock"),
@@ -195,6 +201,8 @@ function forgetLocalTask() {
   state.lastValidation = null;
   state.lastJob = null;
   state.registrationPreview = null;
+  state.registrationExternalLoadedFileKey = null;
+  state.registrationExpandedPartyNo = null;
   state.activeFilter = "all";
   state.resultLimit = 160;
   state.expandedGroups.clear();
@@ -314,6 +322,9 @@ async function uploadFiles(files) {
   if (excelFiles.length) {
     state.excelFile = excelFiles[0];
     renderModePanels();
+    if (state.mode === "registration" && state.jobId) {
+      await loadSelectedExcelAsRegistrationExternalNumbers();
+    }
   }
   if (!documentFiles.length) {
     if (state.excelFile && state.jobId) {
@@ -327,7 +338,7 @@ async function uploadFiles(files) {
 
   setStatus("Загружаем…", "info");
   const formData = new FormData();
-  uniqueFiles(documentFiles).forEach((file) => formData.append("files", file));
+  uniqueFiles([...documentFiles, ...excelFiles.slice(0, 1)]).forEach((file) => formData.append("files", file));
   try {
     const response = await fetch("/api/print/jobs", { method: "POST", body: formData });
     const data = await readJson(response);
@@ -340,10 +351,18 @@ async function uploadFiles(files) {
       documents: data.documents,
       validation: null,
       build: null,
+      registration_external_numbers: data.registration_external_excel?.all_labels || [],
     };
+    if (data.registration_external_excel?.all_labels?.length) {
+      applyRegistrationExternalNumbersFromExcel(state.excelFile, data.registration_external_excel);
+      state.registrationExternalLoadedFileKey = fileKey(state.excelFile);
+    }
     renderUploadSummary(state.lastJob);
     showToast(`Загружено ${data.accepted_documents} ${plural(data.accepted_documents, "DOCX", "DOCX", "DOCX")}`);
     setStep("order");
+    if (state.mode === "registration" && state.excelFile) {
+      await loadSelectedExcelAsRegistrationExternalNumbers();
+    }
   } catch (error) {
     setStatus("Ошибка загрузки", "bad");
     showErrorInOrder(error.message);
@@ -361,6 +380,10 @@ function uniqueFiles(files) {
     seen.add(key);
     return true;
   });
+}
+
+function fileKey(file) {
+  return file ? `${file.name}:${file.size}:${file.lastModified}` : "";
 }
 
 function showErrorInOrder(message) {
@@ -397,6 +420,9 @@ function selectMode(mode) {
   state.activeFilter = "all";
   persistState();
   renderModePanels();
+  if (mode === "registration") {
+    loadSelectedExcelAsRegistrationExternalNumbers();
+  }
 }
 
 function renderModePanels() {
@@ -558,6 +584,12 @@ function registrationPayload() {
   };
 }
 
+function registrationExternalSourceLabel(source) {
+  if (source === "list") return "Список";
+  if (source === "filename") return "Имя DOCX";
+  return "Не задано";
+}
+
 function registrationExternalNumbers() {
   return els.registrationExternalInput.value
     .replace(/\ufeff/g, "")
@@ -574,7 +606,7 @@ function updateRegistrationExternalCount() {
   const duplicates = numbers.length - new Set(numbers.map((item) => item.toLocaleLowerCase("ru"))).size;
   const parts = numbers.length
     ? [`${numbers.length} ${plural(numbers.length, "номер", "номера", "номеров")}`]
-    : ["0 номеров, fallback из имени DOCX"];
+    : ["0 номеров"];
   if (numbers.length && docs) {
     if (diff === 0) parts.push("количество совпадает");
     else if (diff > 0) parts.push(`не хватает ${diff}`);
@@ -586,6 +618,7 @@ function updateRegistrationExternalCount() {
 
 function resetRegistrationPreview() {
   state.registrationPreview = null;
+  state.registrationExpandedPartyNo = null;
   renderRegistrationPreview();
   renderModePanels();
 }
@@ -678,29 +711,36 @@ function renderRegistrationPreview() {
     ...(preview.conflicts || []).slice(0, 5).map((item) => `<article class="issue-card error"><strong>Конфликт</strong><p>${escapeHtml(item)}</p></article>`),
     ...(preview.warnings || []).slice(0, 5).map((item) => `<article class="issue-card warning"><strong>Внимание</strong><p>${escapeHtml(item)}</p></article>`),
   ].join("");
-  const rows = (preview.parties || []).map((party) => `
-    <tr>
-      <td>№ ${escapeHtml(party.party_no)}</td>
-      <td>${escapeHtml(String(party.object_count))}</td>
-      <td>${escapeHtml(party.first_rcsme_reg_no || "—")} → ${escapeHtml(party.last_rcsme_reg_no || "—")}</td>
-      <td>${escapeHtml(party.first_decree_no || "—")} → ${escapeHtml(party.last_decree_no || "—")}</td>
-      <td><span class="badge ${party.status === "конфликт" ? "bad" : party.existing_party_id ? "warn" : "good"}">${escapeHtml(party.status)}</span></td>
-    </tr>
-  `).join("");
-  const firstParty = (preview.parties || [])[0];
-  const sampleRows = (firstParty?.sample_rows || []).slice(0, 12).map((row) => `
-    <tr>
-      <td>${escapeHtml(row.index)}</td>
-      <td>${escapeHtml(row.rcsme_reg_no)}</td>
-      <td>${escapeHtml(row.decree_no)}</td>
-      <td class="truncate" title="${escapeAttr(row.document_name)}">${escapeHtml(row.document_name)}</td>
-      <td>${escapeHtml(row.external_military_no || "—")}</td>
-      <td>${row.external_military_no_source === "list" ? "Список" : "Имя DOCX"}</td>
-    </tr>
-  `).join("");
+  const rows = (preview.parties || []).flatMap((party) => {
+    const expanded = state.registrationExpandedPartyNo === String(party.party_no);
+    const summary = `
+      <tr class="registration-party-summary">
+        <td><button class="row-action secondary" type="button" data-registration-party="${escapeAttr(party.party_no)}">${expanded ? "▾" : "▸"} № ${escapeHtml(party.party_no)}</button></td>
+        <td>${escapeHtml(String(party.object_count))} DOCX</td>
+        <td>${escapeHtml(party.first_rcsme_reg_no || "—")} → ${escapeHtml(party.last_rcsme_reg_no || "—")}</td>
+        <td>${escapeHtml(party.first_decree_no || "—")} → ${escapeHtml(party.last_decree_no || "—")}</td>
+        <td>${escapeHtml(party.first_external_military_no || "—")} → ${escapeHtml(party.last_external_military_no || "—")}</td>
+        <td><span class="badge ${party.status === "конфликт" ? "bad" : party.existing_party_id ? "warn" : "good"}">${escapeHtml(party.status)}</span></td>
+      </tr>`;
+    if (!expanded) return [summary];
+    const details = (party.sample_rows || []).map((row) => `
+      <tr class="registration-object-row">
+        <td>↳ ${escapeHtml(row.index)}</td>
+        <td class="truncate" title="${escapeAttr(row.document_name)}">${escapeHtml(row.document_name)}</td>
+        <td>${escapeHtml(row.rcsme_reg_no)}</td>
+        <td>${escapeHtml(row.decree_no)}</td>
+        <td>${escapeHtml(row.external_military_no || "—")}</td>
+        <td>${registrationExternalSourceLabel(row.external_military_no_source)}</td>
+      </tr>
+    `);
+    if ((party.sample_rows || []).length < party.object_count) {
+      details.push(`<tr class="registration-object-row"><td colspan="6"><small>Показаны первые ${party.sample_rows?.length || 0} из ${party.object_count} объектов.</small></td></tr>`);
+    }
+    return [summary, ...details];
+  }).join("");
   const sourceText = preview.external_military_no_source === "list"
     ? `Из списка: ${preview.external_military_no_count || 0}`
-    : "Из имени DOCX";
+    : "Не задано";
   els.registrationPreview.innerHTML = `
     <div class="metric-grid">
       <div class="metric"><span>Партий</span><strong>${preview.party_count}</strong></div>
@@ -713,20 +753,18 @@ function renderRegistrationPreview() {
     ${warningHtml}
     <div class="table-wrap registration-preview-table">
       <table>
-        <thead><tr><th>Партия</th><th>DOCX</th><th>№ рег РЦСМЭ</th><th>№ постановления / метка</th><th>Статус</th></tr></thead>
+        <thead><tr><th>Партия / №</th><th>DOCX</th><th>№ рег РЦСМЭ</th><th>№ постановления / метка</th><th>№ в в/ч №522</th><th>Статус / источник</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
-    ${firstParty ? `
-      <div class="table-wrap registration-preview-table compact">
-        <table>
-          <caption>Первые строки партии ${escapeHtml(firstParty.party_no)}</caption>
-          <thead><tr><th>№</th><th>№ рег РЦСМЭ</th><th>№ постановления</th><th>Документ</th><th>№ в в/ч №522</th><th>Источник</th></tr></thead>
-          <tbody>${sampleRows}</tbody>
-        </table>
-      </div>
-    ` : ""}
   `;
+  els.registrationPreview.querySelectorAll("[data-registration-party]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const partyNo = button.dataset.registrationParty;
+      state.registrationExpandedPartyNo = state.registrationExpandedPartyNo === partyNo ? null : partyNo;
+      renderRegistrationPreview();
+    });
+  });
 }
 
 function getSequenceInfo() {
@@ -1099,8 +1137,9 @@ function renderValidation(validation) {
   renderResults(validation);
   els.buildButton.hidden = false;
   els.buildButton.disabled = !validation.can_build;
-  els.buildButton.textContent =
-    validation.mode === "excel" ? `Собрать ${stats.pdfCount} ${plural(stats.pdfCount, "PDF", "PDF", "PDF")}` : "Собрать PDF";
+  els.buildButton.textContent = ["excel", "registration"].includes(validation.mode)
+    ? `Собрать ${stats.pdfCount} ${plural(stats.pdfCount, "PDF", "PDF", "PDF")}`
+    : "Собрать PDF";
   updateStepper();
   renderStampingPanel();
 }
@@ -1121,7 +1160,11 @@ function getValidationStats(validation) {
     warningEntries,
     warnings: warningEntries + topWarnings,
     ready: entries.length - errors,
-    pdfCount: validation.mode === "excel" ? validation.total_groups || validation.groups?.length || 0 : 1,
+    pdfCount: validation.mode === "excel"
+      ? validation.total_groups || validation.groups?.length || 0
+      : validation.mode === "registration"
+        ? validation.registration?.party_count || 0
+        : 1,
     stampLabels: stampSummary.labels || 0,
     stampApplied: stampSummary.applied || 0,
     stampSkipped: stampSummary.skipped || 0,
@@ -1453,6 +1496,12 @@ function showProgress(build) {
   const done = build?.done ?? 0;
   const total = build?.total ?? 0;
   const remaining = Math.max(0, total - done);
+  const pipeline = [els.pipelineCheck, els.pipelineConvert, els.pipelineMerge, els.pipelineDownload];
+  const activeIndex = percent >= 99 ? 3 : percent >= 88 ? 2 : 1;
+  pipeline.forEach((item, index) => {
+    item?.classList.toggle("done", index < activeIndex || percent >= 100);
+    item?.classList.toggle("active", index === activeIndex && percent < 100);
+  });
   els.progressText.textContent = `${done} из ${total} документов · ${percent}%`;
   els.progressDetails.innerHTML = `
     <span class="badge info">Этап: преобразование DOCX в PDF</span>
@@ -1496,6 +1545,10 @@ async function refreshJob({ renderTable = false } = {}) {
     showToast("Связь восстановлена");
   }
   state.lastJob = job;
+  if (!registrationExternalNumbers().length && job.registration_external_numbers?.length) {
+    els.registrationExternalInput.value = job.registration_external_numbers.join("\n");
+    updateRegistrationExternalCount();
+  }
   if (job.validation) {
     state.lastValidation = job.validation;
     state.mode = ["excel", "registration"].includes(job.validation.mode) ? job.validation.mode : state.mode || "text";
@@ -1549,9 +1602,12 @@ function renderResult(job) {
   `;
   const primaryHref = isExcel ? `/api/print/jobs/${job.id}/download/zip` : `/api/print/jobs/${job.id}/download/pdf`;
   const primaryText = isExcel ? `Скачать ZIP с ${pdfCount} PDF` : "Скачать PDF";
+  const reportLink = job.report_csv
+    ? `<a class="download secondary-link" href="/api/print/jobs/${job.id}/download/report.csv">Скачать отчёт CSV</a>`
+    : "";
   const html = `
     <a class="download primary-download" href="${primaryHref}">${primaryText}</a>
-    <a class="download secondary-link" href="/api/print/jobs/${job.id}/download/report.csv">Скачать отчёт CSV</a>
+    ${reportLink}
   `;
   els.resultBlock.innerHTML = html;
   els.downloadTitle.textContent = isExcel ? `Готово ${pdfCount} PDF` : "PDF готов";
@@ -1564,7 +1620,7 @@ function renderPartsList(job) {
   const parts = job.build?.result_pdfs || [];
   if (!parts.length) return;
   const title = document.createElement("h3");
-  title.textContent = "PDF по столбцам";
+  title.textContent = job.build?.mode === "registration" ? "PDF по партиям" : "PDF по столбцам";
   els.partsList.append(title);
   parts.forEach((part, index) => {
     const row = document.createElement("div");
@@ -1778,6 +1834,7 @@ function renderStampColumnChoice(file, columns) {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("column", column);
+    formData.append("purpose", "external_military");
     const response = await fetch(`/api/print/jobs/${state.jobId}/stamping/xlsx`, {
       method: "POST",
       body: formData,
@@ -1797,6 +1854,30 @@ function renderStampColumnChoice(file, columns) {
     showToast(`Загружен столбец ${column}: ${data.labels?.length || 0} значений`);
     updateStampSummary();
   });
+}
+
+function applyRegistrationExternalNumbersFromExcel(file, data) {
+  const labels = data.all_labels || data.labels || [];
+  els.registrationExternalWarnings.innerHTML = "";
+  if (!labels.length) {
+    els.registrationExternalWarnings.append(createIssueCard("В Excel не найдено номеров", "Выберите другой файл или вставьте список вручную.", "", "error"));
+    return;
+  }
+  els.registrationExternalInput.value = labels.join("\n");
+  updateRegistrationExternalCount();
+  resetRegistrationPreview();
+  const columns = data.columns || [];
+  const firstColumn = columns[0]?.column || "—";
+  const lastColumn = columns[columns.length - 1]?.column || firstColumn;
+  els.registrationExternalWarnings.append(
+    createIssueCard(
+      "Excel-список загружен",
+      `Загружено ${labels.length} номеров из ${columns.length || 1} колонок: ${firstColumn}${lastColumn !== firstColumn ? `–${lastColumn}` : ""}. Номера идут по колонкам сверху вниз.`,
+      "",
+      "ok",
+    )
+  );
+  showToast(`Excel № в в/ч №522: ${labels.length} номеров`);
 }
 
 function renderRegistrationExternalColumnChoice(file, columns) {
@@ -1822,6 +1903,7 @@ function renderRegistrationExternalColumnChoice(file, columns) {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("column", column);
+    formData.append("purpose", "external_military");
     const response = await fetch(`/api/print/jobs/${state.jobId}/stamping/xlsx`, {
       method: "POST",
       body: formData,
@@ -1831,10 +1913,7 @@ function renderRegistrationExternalColumnChoice(file, columns) {
       showToast(data.detail || "Не удалось загрузить столбец");
       return;
     }
-    els.registrationExternalInput.value = (data.labels || []).join("\n");
-    els.registrationExternalWarnings.innerHTML = "";
-    updateRegistrationExternalCount();
-    resetRegistrationPreview();
+    applyRegistrationExternalNumbersFromExcel(file, data);
     showToast(`Загружен столбец ${column}: ${data.labels?.length || 0} значений`);
   });
 }
@@ -1842,8 +1921,19 @@ function renderRegistrationExternalColumnChoice(file, columns) {
 async function handleRegistrationExternalXlsxUpload() {
   const file = els.registrationExternalXlsxInput.files[0];
   if (!file || !state.jobId) return;
+  await loadRegistrationExternalXlsxFile(file);
+}
+
+async function loadSelectedExcelAsRegistrationExternalNumbers() {
+  if (!state.jobId || !state.excelFile || state.mode !== "registration") return;
+  if (registrationExternalNumbers().length) return;
+  await loadRegistrationExternalXlsxFile(state.excelFile);
+}
+
+async function loadRegistrationExternalXlsxFile(file) {
   const formData = new FormData();
   formData.append("file", file);
+  formData.append("purpose", "external_military");
   try {
     const response = await fetch(`/api/print/jobs/${state.jobId}/stamping/xlsx`, {
       method: "POST",
@@ -1851,7 +1941,8 @@ async function handleRegistrationExternalXlsxUpload() {
     });
     const data = await readJson(response);
     if (!response.ok) throw new Error(data.detail || "Не удалось прочитать Excel с номерами");
-    renderRegistrationExternalColumnChoice(file, data.columns || []);
+    applyRegistrationExternalNumbersFromExcel(file, data);
+    state.registrationExternalLoadedFileKey = fileKey(file);
   } catch (error) {
     showToast(error.message);
   }

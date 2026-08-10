@@ -3,6 +3,7 @@ import { Archive, BarChart3, Check, ChevronDown, ChevronRight, ClipboardList, Co
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type { Employee, Party, ReferenceItem, RegistrationBulkRequest, RegistrationBulkRow, RegistryObject, StageTable, StageTableColumn, StageTableEvent, StageTableRow, User } from '../api/types'
+import { BulkActionBar, EmptyState, StatusBadge } from '../components/ui'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 
 const stageTabs = [
@@ -780,7 +781,7 @@ function StageGrid({
     setFilterSearch('')
     setFilterDraft(columnFilters[column.key] || values)
   }
-  if (!rows.length) return <div className="empty">Объекты не найдены</div>
+  if (!rows.length) return <EmptyState title="Объекты не найдены">Измените поиск или фильтры таблицы.</EmptyState>
   return (
     <div className="stage-grid-wrap">
       <div className="stage-grid" role="table" style={{ gridTemplateColumns }}>
@@ -2173,7 +2174,7 @@ export function PartiesPage({
             <>
               <div className="party-main-head">
                 <div>
-                  <h2>Партия {activeParty.party_no} — {partyObjectCount} {objectWord(partyObjectCount)}</h2>
+                  <h2>Партия {activeParty.party_no} <span className="party-object-count">{partyObjectCount} {objectWord(partyObjectCount)}</span></h2>
                   <div className="party-head-summary">
                     <span>{statusLabels[activeParty.status] || activeParty.status}{stageTable.isFetching ? ' · обновление...' : ''}</span>
                     <strong>Готовность: {readinessPercent}%</strong>
@@ -2181,19 +2182,19 @@ export function PartiesPage({
                   </div>
                 </div>
                 <div className="toolbar-actions party-main-actions">
-                  {canEdit && <button className="icon-button danger" disabled={archiveDisabled} onClick={() => setArchiveOpen(true)}><Archive size={18} />Удалить партию</button>}
-                  {canDeletePermanently && <button className="icon-button danger" onClick={() => setPermanentDeleteOpen(true)}><Archive size={18} />Удалить окончательно</button>}
                   <button className="icon-button" disabled={!printTargetObjectIds.length} onClick={() => openPrintDialog()}><Printer size={18} />Печать</button>
                   <button className="icon-button" disabled={!onReportsOpen} onClick={() => onReportsOpen?.('overview', { party_ids: activeParty.id, case_year: activeParty.case_year })}><BarChart3 size={18} />Отчёт по партии</button>
                   <a className="icon-button" href={api.exportRegistryUrl(objectQuery, activeParty.party_no, activeParty.case_year)} title="Экспорт"><FileDown size={18} />Экспорт</a>
                   {stageCanFill && <button className="primary compact" onClick={() => openMassFill()}><ClipboardList size={18} />Массовое заполнение</button>}
-                  {canEdit && <button className="icon-button" onClick={() => setAddObjectOpen(true)}><Plus size={18} />Добавить объект</button>}
+                  {canEdit && <button className="primary compact" onClick={() => setAddObjectOpen(true)}><Plus size={18} />Добавить объект</button>}
                   {hasDrafts && (
                     <>
                       <button className="icon-button" onClick={() => setDrafts({})}><X size={18} />Отменить правки</button>
                       <button className="primary compact" disabled={saveDrafts.isPending} onClick={() => saveDrafts.mutate()}><Save size={18} />Сохранить изменения</button>
                     </>
                   )}
+                  {canEdit && !archiveDisabled && <button className="icon-button danger party-danger-action" onClick={() => setArchiveOpen(true)}><Archive size={18} />Удалить партию</button>}
+                  {canDeletePermanently && <button className="icon-button danger party-danger-action" onClick={() => setPermanentDeleteOpen(true)}><Archive size={18} />Удалить окончательно</button>}
                 </div>
               </div>
               <div className={`party-control-panel ${controlCollapsed ? 'collapsed' : ''}`}>
@@ -2244,7 +2245,7 @@ export function PartiesPage({
               </div>
               <div className="chips party-progress">
                 {orderedStageCounts(progress.data?.stage_counts ?? {}).map(([stage, count]) => <span key={stage}>{stageLabels[stage] || stage}: {count}</span>)}
-                {!Object.keys(progress.data?.stage_counts ?? {}).length && <span>Этапов нет</span>}
+                {activeStage !== 'registration' && !Object.keys(progress.data?.stage_counts ?? {}).length && <span>Нет записей этапов</span>}
               </div>
               <div className="toolbar stage-toolbar">
                 <div className="searchbox"><Search size={18} /><input value={objectQuery} onChange={(event) => setObjectQuery(event.target.value)} placeholder="Поиск внутри партии по номеру, в/ч, следователю, типу, этапам..." /></div>
@@ -2252,20 +2253,24 @@ export function PartiesPage({
                   {quickFilters.map(([key, label]) => <button key={key || 'all'} className={quick === key ? 'active' : ''} onClick={() => setQuick(key)}>{label}</button>)}
                 </div>
                 <button className="icon-button" disabled={!columns.length} onClick={() => setColumnSettingsOpen(true)}><Columns3 size={18} />Столбцы</button>
+                {!selectedRows.size && <button className="icon-button" disabled={!filteredRows.length} onClick={() => copyVisibleNumbers()}><Copy size={18} />Скопировать номера</button>}
+                <span>{stageTable.isFetching ? 'Обновление...' : `${filteredObjectCount} ${objectWord(filteredObjectCount)}`}</span>
+                {copyMessage && <strong>{copyMessage}</strong>}
+              </div>
+              <BulkActionBar count={selectedRows.size}>
+                <button className="icon-button" onClick={() => copyVisibleNumbers()}><Copy size={18} />Скопировать номера</button>
+                {stageCanFill && <button className="icon-button" onClick={() => openMassFill()}><ClipboardList size={18} />Массовое заполнение</button>}
+                <button className="icon-button" disabled={!printTargetObjectIds.length} onClick={() => openPrintDialog()}><Printer size={18} />Печать</button>
                 {canEdit && (
                   <button
                     className="icon-button danger"
-                    disabled={!selectedRows.size || archiveObject.isPending}
+                    disabled={archiveObject.isPending}
                     onClick={() => { setArchiveObjectsOpen(true); setArchiveObjectsConfirm(''); setArchiveObjectMessage('') }}
                   >
-                    <Archive size={18} />Удалить объект
+                    <Archive size={18} />Удалить
                   </button>
                 )}
-                <button className="icon-button" disabled={!filteredRows.length} onClick={() => copyVisibleNumbers()}><Copy size={18} />Скопировать номера</button>
-                <span>{stageTable.isFetching ? 'Обновление...' : `${filteredObjectCount} ${objectWord(filteredObjectCount)}`}</span>
-                {selectedRows.size > 0 && <strong>{selectedRows.size} выбрано</strong>}
-                {copyMessage && <strong>{copyMessage}</strong>}
-              </div>
+              </BulkActionBar>
               {controlToast && <div className="alert warning stage-toast">{controlToast}</div>}
               {(toggleNoObjectControl.error || toggleNoDecreeControl.error) && <div className="alert error">{(toggleNoObjectControl.error || toggleNoDecreeControl.error)?.message}</div>}
               {toggleBurntBone.error && <div className="alert error">{toggleBurntBone.error.message}</div>}
@@ -2841,14 +2846,19 @@ export function PartiesPage({
       )}
       {historyRow && (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setHistoryRow(null)}>
-          <div className="modal" role="dialog" aria-modal="true" aria-label="История попыток" onMouseDown={(event) => event.stopPropagation()}>
+          <div className="modal history-modal" role="dialog" aria-modal="true" aria-label="История попыток" onMouseDown={(event) => event.stopPropagation()}>
             <h2>История попыток</h2>
-            <div className="timeline">
+            <div className="history-attempt-table" role="table" aria-label="Попытки этапа">
+              <div className="history-attempt-head" role="row">
+                <span>Дата</span><span>Попытка</span><span>Источник</span><span>Исполнитель</span><span>Комментарий</span>
+              </div>
               {(historyRow.history.length ? historyRow.history : historyRow.latest_event ? [historyRow.latest_event] : []).map((event: StageTableEvent) => (
-                <div className="timeline-row" key={event.id}>
+                <div className="history-attempt-row" role="row" key={event.id}>
                   <span>{formatDate(event.event_date)}</span>
-                  <strong>{stageLabels[event.stage_type] || event.stage_type} #{event.attempt_no}</strong>
-                  <em>{sourceLabels[event.source] || event.source}</em>
+                  <strong>#{event.attempt_no}</strong>
+                  <span><StatusBadge tone="info">{sourceLabels[event.source] || event.source}</StatusBadge></span>
+                  <span>{event.performers.join(', ') || '—'}</span>
+                  <span>{event.comment || '—'}</span>
                 </div>
               ))}
             </div>

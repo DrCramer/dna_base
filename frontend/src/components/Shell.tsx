@@ -95,7 +95,7 @@ export function Shell({ user, active, onNavigate, onLogout, theme, themeMode, on
           {workItems.filter((item) => item.visible).map((item) => {
             const Icon = item.icon
             return (
-              <button key={item.id} className={active === item.id ? 'active' : ''} onClick={() => onNavigate(item.id)} title={item.label}>
+              <button key={item.id} className={active === item.id ? 'active' : ''} onClick={() => onNavigate(item.id)} title={item.label} aria-current={active === item.id ? 'page' : undefined}>
                 <Icon size={18} />
                 <span>{item.label}</span>
               </button>
@@ -105,7 +105,7 @@ export function Shell({ user, active, onNavigate, onLogout, theme, themeMode, on
           {controlItems.filter((item) => item.visible).map((item) => {
             const Icon = item.icon
             return (
-              <button key={item.id} className={active === item.id ? 'active' : ''} onClick={() => onNavigate(item.id)} title={item.label}>
+              <button key={item.id} className={active === item.id ? 'active' : ''} onClick={() => onNavigate(item.id)} title={item.label} aria-current={active === item.id ? 'page' : undefined}>
                 <Icon size={18} />
                 <span>{item.label}</span>
               </button>
@@ -115,7 +115,7 @@ export function Shell({ user, active, onNavigate, onLogout, theme, themeMode, on
           {adminItems.filter((item) => item.visible).map((item) => {
             const Icon = item.icon
             return (
-              <button key={item.id} className={active === item.id ? 'active' : ''} onClick={() => onNavigate(item.id)} title={item.label}>
+              <button key={item.id} className={active === item.id ? 'active' : ''} onClick={() => onNavigate(item.id)} title={item.label} aria-current={active === item.id ? 'page' : undefined}>
                 <Icon size={18} />
                 <span>{item.label}</span>
               </button>
@@ -139,7 +139,7 @@ export function Shell({ user, active, onNavigate, onLogout, theme, themeMode, on
                   {importItems.map((item) => {
                     const Icon = item.icon
                     return (
-                      <button key={item.id} className={active === item.id ? 'active' : ''} onClick={() => onNavigate(item.id)} title={`Импорт ${item.label}`}>
+                      <button key={item.id} className={active === item.id ? 'active' : ''} onClick={() => onNavigate(item.id)} title={`Импорт ${item.label}`} aria-current={active === item.id ? 'page' : undefined}>
                         <Icon size={16} />
                         <span>{item.label}</span>
                       </button>
@@ -149,7 +149,7 @@ export function Shell({ user, active, onNavigate, onLogout, theme, themeMode, on
               )}
             </div>
           )}
-          <button className={active === 'export' ? 'active' : ''} onClick={() => onNavigate('export')} title="Экспорт">
+          <button className={active === 'export' ? 'active' : ''} onClick={() => onNavigate('export')} title="Экспорт" aria-current={active === 'export' ? 'page' : undefined}>
             <FileDown size={18} />
             <span>Экспорт</span>
           </button>

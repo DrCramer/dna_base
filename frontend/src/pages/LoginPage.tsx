@@ -32,7 +32,7 @@ export function LoginPage({ onLogin }: { onLogin: (username: string, password: s
   return (
     <div className="login-screen">
       <form className="login-panel" onSubmit={submit}>
-        <div className="login-title"><LockKeyhole size={24} /><h1>Лабораторный реестр ДНК</h1></div>
+        <div className="login-title"><LockKeyhole size={24} /><div><h1>Лабораторный реестр ДНК</h1><p>Система учёта объектов генетической лаборатории</p></div></div>
         {previewWarning && <div className="alert error">{previewWarning}</div>}
         <label>Логин<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" /></label>
         <label>Пароль<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" /></label>

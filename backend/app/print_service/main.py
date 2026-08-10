@@ -43,6 +43,7 @@ from app.print_service.services.stamping_service import (
     copy_preview_with_stamp,
     default_stamp_config,
     normalize_stamp_config,
+    parse_external_military_xlsx,
     parse_label_xlsx,
     render_preview_png,
     stamp_entries,
@@ -53,6 +54,24 @@ def _safe_download_stem(value: str, fallback: str) -> str:
     cleaned = re.sub(r"[^0-9A-Za-zА-Яа-яЁё._ -]+", "_", value).strip(" ._-")
     cleaned = re.sub(r"\s+", "_", cleaned)
     return (cleaned or fallback)[:80]
+
+
+def _registration_pdf_name(entries: list[dict], fallback: str) -> str:
+    if not entries:
+        return f"{fallback}.pdf"
+    party_no = str(entries[0].get("party_no") or fallback)
+    first_no = str(entries[0].get("external_military_no") or entries[0].get("rcsme_reg_no") or "first")
+    last_no = str(entries[-1].get("external_military_no") or entries[-1].get("rcsme_reg_no") or "last")
+    stem = _safe_download_stem(f"{party_no}_{first_no}-{last_no}", fallback)
+    return f"{stem}.pdf"
+
+
+def _registration_entry_groups(entries: list[dict]) -> list[tuple[str, list[dict]]]:
+    grouped: dict[str, list[dict]] = {}
+    for entry in entries:
+        party_no = str(entry.get("party_no") or "")
+        grouped.setdefault(party_no, []).append(entry)
+    return list(grouped.items())
 
 
 def _reset_entry_for_build(entry: dict) -> None:
@@ -99,6 +118,28 @@ def _parse_excel_stamping_json(raw: str | None) -> dict:
         config = copy.deepcopy(config)
         config["enabled"] = False
     return config
+
+
+async def _save_uploaded_xlsx(file: UploadFile, target: Path, error_message: str) -> None:
+    size = 0
+    with target.open("wb") as handle:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > settings.max_single_file_bytes:
+                raise HTTPException(status_code=400, detail=error_message)
+            handle.write(chunk)
+
+
+def _registration_payload_with_job_numbers(state: dict, payload: AutoRegistrationPayload) -> AutoRegistrationPayload:
+    if payload.external_military_numbers:
+        return payload
+    stored_numbers = state.get("registration_external_numbers") or []
+    if not stored_numbers:
+        return payload
+    return payload.model_copy(update={"external_military_numbers": list(stored_numbers)})
 
 
 PACKAGE_DIR = Path(__file__).resolve().parent
@@ -244,12 +285,31 @@ async def create_job_endpoint(request: Request):
     ]
     if not files:
         raise HTTPException(status_code=400, detail="Загрузите хотя бы один DOCX или ZIP")
+    xlsx_files = [file for file in files if str(file.filename or "").lower().endswith(".xlsx")]
+    document_files = [file for file in files if file not in xlsx_files]
+    if not document_files:
+        raise HTTPException(status_code=400, detail="Загрузите хотя бы один DOCX или ZIP")
     state = create_job()
     job_dir = get_job_dir(state["id"])
     try:
-        documents = await accept_uploads(files, job_dir, settings)
+        documents = await accept_uploads(document_files, job_dir, settings)
         if not documents:
             raise UploadValidationError("Не найдено ни одного DOCX для обработки")
+        external_excel = None
+        if xlsx_files:
+            external_path = job_dir / "extracted" / "external-military.xlsx"
+            await _save_uploaded_xlsx(
+                xlsx_files[0],
+                external_path,
+                "Excel-файл с номерами № в в/ч №522 слишком большой",
+            )
+            external_excel = parse_external_military_xlsx(external_path)
+            state["registration_external_numbers"] = external_excel["all_labels"]
+            state["registration_external_excel"] = {
+                "filename": xlsx_files[0].filename,
+                "count": len(external_excel["all_labels"]),
+                "column_count": external_excel["column_count"],
+            }
         state["documents"] = documents
         state["status"] = "uploaded"
         save_state(state["id"], state)
@@ -258,8 +318,9 @@ async def create_job_endpoint(request: Request):
             "status": state["status"],
             "accepted_documents": len(documents),
             "documents": documents,
+            "registration_external_excel": external_excel,
         }
-    except UploadValidationError as exc:
+    except (UploadValidationError, StampingValidationError) as exc:
         delete_job(state["id"])
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -353,6 +414,7 @@ async def preview_auto_registration(
     state = _load_state_or_404(job_id)
     if not state.get("documents"):
         raise HTTPException(status_code=400, detail="В задаче нет загруженных DOCX")
+    payload = _registration_payload_with_job_numbers(state, payload)
     return await build_auto_registration_preview(session, state["documents"], payload)
 
 
@@ -366,6 +428,7 @@ async def apply_registration_to_job(
     state = _load_state_or_404(job_id)
     if not state.get("documents"):
         raise HTTPException(status_code=400, detail="В задаче нет загруженных DOCX")
+    payload = _registration_payload_with_job_numbers(state, payload)
     preview, validation = await apply_auto_registration(session, user, state["documents"], payload)
     state["registration"] = preview
     state["base_validation"] = copy.deepcopy(validation)
@@ -461,6 +524,8 @@ async def _run_build_job(job_id: str):
 
     if validation.get("mode") == "excel":
         return await _build_excel_job(job_id, state)
+    if validation.get("mode") == "registration":
+        return await _build_registration_job(job_id, state)
 
     entries = copy.deepcopy(validation["entries"])
     for entry in entries:
@@ -533,6 +598,139 @@ async def _run_build_job(job_id: str):
         state["validation"]["entries"] = entries
         write_csv_report(entries, job_dir / "result" / "report.csv")
         state["report_csv"] = "result/report.csv"
+        save_state(job_id, state)
+        save_report_json(job_id, {"job_id": job_id, "validation": state["validation"], "build": state["build"]})
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+async def _build_registration_job(job_id: str, state: dict):
+    job_dir = get_job_dir(job_id)
+    validation = state["validation"]
+    groups = _registration_entry_groups(validation["entries"])
+    output_dir = job_dir / "result" / "party_pdfs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    total = len(validation["entries"])
+    completed = 0
+    result_pdfs: list[dict] = []
+    converted_all: list[dict] = []
+    build_warnings: list[str] = []
+
+    try:
+        for group_index, (party_no, source_entries) in enumerate(groups, start=1):
+            entries = copy.deepcopy(source_entries)
+            for entry in entries:
+                _reset_entry_for_build(entry)
+
+            await _save_progress(
+                job_id,
+                done=completed,
+                total=total,
+                message=f"Конвертация партии {party_no}",
+                current_group=f"Партия {party_no}",
+                done_groups=group_index - 1,
+                total_groups=len(groups),
+            )
+
+            async def on_progress(done_in_group: int, group_total: int, entry: dict) -> None:
+                if done_in_group == group_total or done_in_group % 5 == 0 or entry.get("blocking"):
+                    await _save_progress(
+                        job_id,
+                        done=completed + done_in_group,
+                        total=total,
+                        message=f"Партия {party_no}: {done_in_group} из {group_total}",
+                        current_group=f"Партия {party_no}",
+                        done_groups=group_index - 1,
+                        total_groups=len(groups),
+                    )
+
+            converted_entries, pdf_paths = await convert_entries(
+                entries,
+                state["documents"],
+                job_dir,
+                settings,
+                progress_callback=on_progress,
+            )
+            size_keys = {
+                (
+                    entry["pdf_analysis"]["pages"][0]["width_mm"],
+                    entry["pdf_analysis"]["pages"][0]["height_mm"],
+                    entry["pdf_analysis"]["pages"][0]["rotate"],
+                )
+                for entry in converted_entries
+            }
+            if len(size_keys) > 1:
+                message = f"Партия {party_no}: в PDF есть страницы разного размера или ориентации."
+                if settings.require_same_page_size:
+                    raise PdfValidationError(message)
+                build_warnings.append(message)
+
+            stamped_paths, stamp_summary = stamp_entries(
+                converted_entries,
+                pdf_paths,
+                job_dir,
+                validation.get("stamping", {}).get("config"),
+            )
+            download_name = _registration_pdf_name(converted_entries, f"party_{group_index:02d}")
+            output_pdf = output_dir / download_name
+            merge = merge_pdfs(stamped_paths, output_pdf)
+            for page_index, entry in enumerate(converted_entries, start=1):
+                entry["final_page"] = page_index
+                entry["result_pdf_name"] = download_name
+
+            result_pdfs.append(
+                {
+                    "title": f"Партия {party_no}",
+                    "download_name": download_name,
+                    "path": str(output_pdf.relative_to(job_dir)),
+                    "page_count": merge["page_count"],
+                    "size_bytes": merge["size_bytes"],
+                    "stamping": stamp_summary,
+                }
+            )
+            converted_all.extend(converted_entries)
+            completed += len(converted_entries)
+
+        zip_path = job_dir / "result" / "registration-parties.zip"
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for pdf in result_pdfs:
+                archive.write(job_dir / pdf["path"], arcname=pdf["download_name"])
+
+        state["validation"]["entries"] = converted_all
+        state["build"] = {
+            "progress": "ready",
+            "mode": "registration",
+            "warnings": build_warnings,
+            "result_pdfs": result_pdfs,
+            "stamping": {
+                "enabled": bool(validation.get("stamping", {}).get("config", {}).get("enabled")),
+                "applied": sum(pdf["stamping"]["applied"] for pdf in result_pdfs),
+                "skipped": sum(pdf["stamping"]["skipped"] for pdf in result_pdfs),
+            },
+            "zip": {
+                "path": str(zip_path.relative_to(job_dir)),
+                "size_bytes": zip_path.stat().st_size,
+                "pdf_count": len(result_pdfs),
+                "page_count": sum(pdf["page_count"] for pdf in result_pdfs),
+            },
+            "message": "PDF собраны по партиям в порядке списка № в в/ч №522.",
+            "print_warning": "При печати выберите «Фактический размер» или «100%».",
+        }
+        state["result_pdf"] = None
+        state["result_zip"] = "result/registration-parties.zip"
+        state["report_csv"] = None
+        state["status"] = "ready"
+        state["error"] = None
+        save_state(job_id, state)
+        save_report_json(job_id, {"job_id": job_id, "validation": state["validation"], "build": state["build"]})
+        return state["build"]
+    except (ConversionError, PdfValidationError) as exc:
+        state["status"] = "failed"
+        state["build"] = {"progress": "failed", "mode": "registration", "warnings": [], "error": str(exc)}
+        state["error"] = str(exc)
+        if converted_all:
+            state["validation"]["entries"] = converted_all
+            write_csv_report(converted_all, job_dir / "result" / "report.csv")
+            state["report_csv"] = "result/report.csv"
         save_state(job_id, state)
         save_report_json(job_id, {"job_id": job_id, "validation": state["validation"], "build": state["build"]})
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -736,24 +934,26 @@ async def parse_stamping_xlsx(
     job_id: str,
     file: UploadFile = File(...),
     column: str | None = Form(default=None),
+    purpose: str = Form(default="stamp"),
 ):
-    _load_state_or_404(job_id)
+    state = _load_state_or_404(job_id)
     filename = file.filename or ""
     if not filename.lower().endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="Загрузите Excel-файл .xlsx")
     job_dir = get_job_dir(job_id)
     labels_path = job_dir / "extracted" / "stamp-labels.xlsx"
-    size = 0
-    with labels_path.open("wb") as handle:
-        while True:
-            chunk = await file.read(1024 * 1024)
-            if not chunk:
-                break
-            size += len(chunk)
-            if size > settings.max_single_file_bytes:
-                raise HTTPException(status_code=400, detail="Excel-файл с метками слишком большой")
-            handle.write(chunk)
+    await _save_uploaded_xlsx(file, labels_path, "Excel-файл с метками слишком большой")
     try:
+        if purpose == "external_military":
+            parsed = parse_external_military_xlsx(labels_path, column)
+            state["registration_external_numbers"] = parsed["all_labels"]
+            state["registration_external_excel"] = {
+                "filename": filename,
+                "count": len(parsed["all_labels"]),
+                "column_count": parsed["column_count"],
+            }
+            save_state(job_id, state)
+            return parsed
         return parse_label_xlsx(labels_path, column)
     except StampingValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

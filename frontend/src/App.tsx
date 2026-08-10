@@ -104,6 +104,66 @@ export function App() {
   }, [uiScale])
 
   useEffect(() => {
+    let returnFocus: HTMLElement | null = null
+    let lastOutsideFocus: HTMLElement | null = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    let activeModal: HTMLElement | null = null
+    function rememberOutsideFocus(event: FocusEvent) {
+      const target = event.target
+      if (target instanceof HTMLElement && !target.closest('.modal-backdrop')) lastOutsideFocus = target
+    }
+    const observer = new MutationObserver(() => {
+      const backdrops = document.querySelectorAll<HTMLElement>('.modal-backdrop')
+      const modal = backdrops.item(backdrops.length - 1)?.querySelector<HTMLElement>('[role="dialog"]')
+      if (modal && modal !== activeModal) {
+        returnFocus = lastOutsideFocus
+        activeModal = modal
+      }
+      if (modal && !modal.contains(document.activeElement)) {
+        window.setTimeout(() => {
+          const target = modal.querySelector<HTMLElement>('[autofocus], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), button:not(:disabled), [tabindex]:not([tabindex="-1"])')
+          target?.focus()
+        }, 0)
+      } else if (!modal && returnFocus) {
+        returnFocus.focus()
+        returnFocus = null
+        activeModal = null
+      }
+    })
+    observer.observe(document.body, { childList: true, subtree: true })
+    window.addEventListener('focusin', rememberOutsideFocus)
+    function closeTopModal(event: KeyboardEvent) {
+      const backdrops = document.querySelectorAll<HTMLElement>('.modal-backdrop')
+      const backdrop = backdrops.item(backdrops.length - 1)
+      if (!backdrop) return
+      const modal = backdrop.querySelector<HTMLElement>('[role="dialog"]')
+      if (event.key === 'Tab' && modal) {
+        const focusable = Array.from(modal.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])'))
+          .filter((element) => element.offsetParent !== null)
+        if (!focusable.length) return
+        const first = focusable[0]
+        const last = focusable[focusable.length - 1]
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault()
+          last.focus()
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault()
+          first.focus()
+        }
+        return
+      }
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      backdrop.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    }
+    window.addEventListener('keydown', closeTopModal)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('focusin', rememberOutsideFocus)
+      window.removeEventListener('keydown', closeTopModal)
+    }
+  }, [])
+
+  useEffect(() => {
     if (view !== 'reports' || objectId !== null) {
       clearReportUrlParams()
     }

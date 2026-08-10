@@ -26,6 +26,8 @@ def create_job() -> dict[str, Any]:
         "created_at": utc_now_iso(),
         "updated_at": utc_now_iso(),
         "documents": [],
+        "registration_external_numbers": [],
+        "registration_external_excel": None,
         "base_validation": None,
         "validation": None,
         "build": None,

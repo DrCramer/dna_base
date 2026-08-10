@@ -14,13 +14,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Party, RegistryObject, User
 from app.parsers.normalization import normalize_number, number_base
 from app.print_service.models import AutoRegistrationPayload
-from app.print_service.services.matching_service import match_documents
-from app.print_service.services.stamping_service import apply_stamping_to_validation, default_stamp_config
+from app.print_service.services.stamping_service import (
+    apply_stamping_to_validation,
+    default_stamp_config,
+    normalize_external_military_label,
+)
 from app.services.audit import write_audit
 from app.services.registry import recalculate_party_counts
 
 
-LAB_TOKEN_RE = re.compile(r"(?<![0-9A-Za-zА-Яа-яЁё])([A-Za-zА-Яа-яЁё]{1,5}\s*\d{2,})(?![0-9A-Za-zА-Яа-яЁё])")
+LAB_TOKEN_RE = re.compile(
+    r"(?<![0-9A-Za-zА-Яа-яЁё])([A-Za-zА-Яа-яЁё]{1,5}\s*-?\s*\d+(?:-\d+)?)(?![0-9A-Za-zА-Яа-яЁё])"
+)
 
 
 def _compact_text(value: str | None) -> str | None:
@@ -52,17 +57,12 @@ def _parse_rcsme_start(value: str) -> tuple[int, int]:
 
 def _document_label(doc: dict[str, Any]) -> str | None:
     stem = Path(str(doc.get("original_name") or "")).stem
-    matches = LAB_TOKEN_RE.findall(stem)
-    if not matches:
-        return None
-    return " ".join(matches[-1].split()).lower()
+    labels = [label for match in LAB_TOKEN_RE.findall(stem) if (label := normalize_external_military_label(match))]
+    return labels[-1] if labels else None
 
 
 def _external_number(value: str | None) -> str | None:
-    text = _compact_text(value)
-    if not text:
-        return None
-    return re.sub(r"\s+", "", text.replace("–", "-").replace("—", "-").replace("−", "-")).lower()
+    return normalize_external_military_label(value)
 
 
 def _external_numbers(payload: AutoRegistrationPayload, documents_count: int) -> list[str]:
@@ -80,29 +80,68 @@ def _external_numbers(payload: AutoRegistrationPayload, documents_count: int) ->
     return numbers
 
 
-def _documents_by_id(documents: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    return {str(doc["id"]): doc for doc in documents}
-
-
 def _ordered_documents_from_external_numbers(
     documents: list[dict[str, Any]],
     external_numbers: list[str],
 ) -> tuple[list[dict[str, Any]], dict[str, str], dict[str, Any] | None]:
     if not external_numbers:
         return documents, {}, None
-    matching = match_documents("\n".join(external_numbers), documents)
-    if not matching["can_build"]:
-        return [], {}, matching
-    by_id = _documents_by_id(documents)
-    ordered: list[dict[str, Any]] = []
-    external_by_doc_id: dict[str, str] = {}
-    for entry in matching["entries"]:
-        doc_id = entry.get("doc_id")
-        if not doc_id:
+    documents_by_number: dict[str, list[dict[str, Any]]] = {}
+    documents_without_number: list[dict[str, Any]] = []
+    for doc in documents:
+        number = _document_label(doc)
+        if not number:
+            documents_without_number.append(doc)
             continue
-        ordered.append(by_id[doc_id])
-        external_by_doc_id[doc_id] = entry["number"]
-    return ordered, external_by_doc_id, matching
+        documents_by_number.setdefault(number, []).append(doc)
+
+    ordered_documents: list[dict[str, Any]] = []
+    external_by_doc_id: dict[str, str] = {}
+    entries: list[dict[str, Any]] = []
+    blocking_errors: list[str] = []
+    used_doc_ids: set[str] = set()
+    for order, number in enumerate(external_numbers, start=1):
+        matches = documents_by_number.get(number, [])
+        entry = {
+            "order": order,
+            "number": number,
+            "matched_file": None,
+            "doc_id": None,
+            "status": "Готов",
+            "blocking": False,
+            "error": "",
+        }
+        if not matches:
+            entry.update(status="Не найден", blocking=True, error="DOCX с таким номером не найден")
+            blocking_errors.append(f"{number} — DOCX с таким номером не найден")
+        elif len(matches) > 1:
+            names = ", ".join(doc["original_name"] for doc in matches[:3])
+            entry.update(status="Ошибка", blocking=True, error=f"Найдено несколько DOCX: {names}")
+            blocking_errors.append(f"{number} — найдено несколько DOCX")
+        else:
+            doc = matches[0]
+            entry["matched_file"] = doc["original_name"]
+            entry["doc_id"] = doc["id"]
+            ordered_documents.append(doc)
+            external_by_doc_id[str(doc["id"])] = number
+            used_doc_ids.add(str(doc["id"]))
+        entries.append(entry)
+
+    unused_documents = [doc for doc in documents if str(doc["id"]) not in used_doc_ids]
+    warnings: list[str] = []
+    if documents_without_number:
+        warnings.append(f"В {len(documents_without_number)} DOCX не найден № в в/ч №522 в имени файла.")
+    if unused_documents:
+        warnings.append(f"Не используются DOCX: {len(unused_documents)}.")
+    matching = {
+        "entries": entries,
+        "unused_documents": unused_documents,
+        "warnings": warnings,
+        "blocking_errors": blocking_errors,
+        "can_build": not blocking_errors and bool(ordered_documents),
+        "total": len(entries),
+    }
+    return ordered_documents, external_by_doc_id, matching
 
 
 def _party_no(start_party_no: int, offset: int) -> str:
@@ -177,7 +216,7 @@ async def build_auto_registration_preview(
         raise HTTPException(status_code=400, detail="Год должен быть в диапазоне 1900–2200")
     start_party = _parse_positive_int(payload.start_party_no, "Стартовая партия")
     external_numbers = _external_numbers(payload, len(documents))
-    external_source = "list" if external_numbers else "filename"
+    external_source = "list" if external_numbers else "empty"
     ordered_documents, external_by_doc_id, matching = _ordered_documents_from_external_numbers(documents, external_numbers)
     suggested_start, previous_party_no, previous_last = await registration_start_hint(session, payload.case_year)
     start_base, suffix = _parse_rcsme_start(payload.start_rcsme_reg_no or suggested_start)
@@ -232,6 +271,8 @@ async def build_auto_registration_preview(
         last_rcsme: str | None = None
         first_decree: str | None = None
         last_decree: str | None = None
+        first_external: str | None = None
+        last_external: str | None = None
         sample_rows: list[dict[str, Any]] = []
         for local_index, doc in enumerate(docs, start=1):
             rcsme_reg_no = f"{next_base}-{suffix}"
@@ -246,7 +287,7 @@ async def build_auto_registration_preview(
                 "registry_row_no": str(local_index),
                 "rcsme_reg_no": rcsme_reg_no,
                 "decree_no": decree_no,
-                "external_military_no": external_by_doc_id.get(doc["id"]) if external_numbers else _document_label(doc),
+                "external_military_no": external_by_doc_id.get(doc["id"]),
                 "external_military_no_source": external_source,
                 "stamp_label": decree_no if payload.stamp_field == "decree_no" else rcsme_reg_no,
                 "conflicts": [],
@@ -255,8 +296,10 @@ async def build_auto_registration_preview(
             if first_rcsme is None:
                 first_rcsme = rcsme_reg_no
                 first_decree = decree_no
+                first_external = row["external_military_no"]
             last_rcsme = rcsme_reg_no
             last_decree = decree_no
+            last_external = row["external_military_no"]
             if len(sample_rows) < 25:
                 sample_rows.append(row)
             next_base += 1
@@ -269,6 +312,8 @@ async def build_auto_registration_preview(
                 "last_rcsme_reg_no": last_rcsme,
                 "first_decree_no": first_decree,
                 "last_decree_no": last_decree,
+                "first_external_military_no": first_external,
+                "last_external_military_no": last_external,
                 "existing_party_id": existing_party.id if existing_party else None,
                 "existing_object_count": existing_count,
                 "will_create_party": existing_party is None,
@@ -304,7 +349,7 @@ async def build_auto_registration_preview(
 
     without_external = sum(1 for row in rows if not row["external_military_no"])
     if without_external and not external_numbers:
-        warnings.append(f"Для {without_external} DOCX не удалось извлечь № в в/ч №522 из имени файла.")
+        warnings.append(f"Для {without_external} DOCX не задан № в в/ч №522. Загрузите Excel/TXT список или вставьте номера вручную.")
     if external_numbers:
         duplicates = len(external_numbers) - len(set(external_numbers))
         if duplicates:

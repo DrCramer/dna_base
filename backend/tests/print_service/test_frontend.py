@@ -72,3 +72,24 @@ def test_registration_mode_shows_stamp_style_without_manual_label_options():
     assert 'els.stampTextBlock.hidden = isRegistration || state.mode === "excel";' in text
     assert 'state.mode === "registration" ? false : els.stampRejectDuplicatesInput.checked' in text
     assert 'state.mode === "registration" ? false : els.stampAllowSkipInput.checked' in text
+
+
+def test_registration_mode_auto_uses_uploaded_excel_as_external_list():
+    text = APP_JS.read_text(encoding="utf-8")
+    assert 'if (mode === "registration") {' in text
+    assert "loadSelectedExcelAsRegistrationExternalNumbers();" in text
+    assert 'formData.append("purpose", "external_military");' in text
+    assert '["0 номеров"]' in text
+    assert "state.registrationExternalLoadedFileKey = null;" in text
+    assert "if (state.registrationExternalLoadedFileKey === key) return;" not in text
+    assert 'uniqueFiles([...documentFiles, ...excelFiles.slice(0, 1)])' in text
+    assert "job.registration_external_numbers?.length" in text
+
+
+def test_registration_preview_uses_one_expandable_table_and_party_pdf_count():
+    text = APP_JS.read_text(encoding="utf-8")
+
+    assert 'data-registration-party=' in text
+    assert 'registration-preview-table compact' not in text
+    assert 'validation.registration?.party_count || 0' in text
+    assert '["excel", "registration"].includes(validation.mode)' in text
