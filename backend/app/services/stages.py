@@ -393,14 +393,15 @@ def _merge_comments(*values: str | None) -> str | None:
 
 
 def _merge_sample_prep_specs(items: list[dict[str, Any]], registry_filled_by: Any = None) -> dict[str, Any] | None:
-    if not items:
+    row_registry_filled_by = clean_text(registry_filled_by)
+    if not items and not row_registry_filled_by:
         return None
     details = [item.get("detail_data") or {} for item in items]
     performers = []
     for item in items:
         performers.extend(item.get("performers") or [])
     filled_by = next((detail.get("registry_filled_by") for detail in details if detail.get("registry_filled_by")), None)
-    filled_by = filled_by or clean_text(registry_filled_by)
+    filled_by = filled_by or row_registry_filled_by
     return {
         "stage_type": "sample_prep",
         "event_date": _latest_date(*(item.get("event_date") for item in items)),
@@ -479,22 +480,25 @@ def registry_event_specs(event: dict[str, Any]) -> list[dict[str, Any]]:
 
     if table == "dna_extractions":
         extraction_no = data.get("extraction_no") or None
-        specs.append(
-            {
-                "stage_type": "dna_extraction",
-                "event_date": data.get("extraction_date"),
-                "comment": data.get("comment"),
-                "attempt_no": extraction_no,
-                "detail_data": data,
-                "performers": [{"raw_name": data.get("performer"), "role": "dna_extraction"}],
-            }
-        )
-        if any(data.get(key) for key in ("quant_method", "quant_date", "quant_performer", "pipetting_method")):
+        extraction_comment = data.get("extraction_comment") if "extraction_comment" in data else data.get("comment")
+        quant_comment = data.get("quant_comment") if "quant_comment" in data else data.get("comment")
+        if any(data.get(key) for key in ("extraction_date", "performer", "extraction_method")) or extraction_comment:
+            specs.append(
+                {
+                    "stage_type": "dna_extraction",
+                    "event_date": data.get("extraction_date"),
+                    "comment": extraction_comment,
+                    "attempt_no": extraction_no,
+                    "detail_data": data,
+                    "performers": [{"raw_name": data.get("performer"), "role": "dna_extraction"}],
+                }
+            )
+        if any(data.get(key) for key in ("quant_method", "quant_date", "quant_performer", "pipetting_method")) or quant_comment:
             specs.append(
                 {
                     "stage_type": "realtime",
                     "event_date": data.get("quant_date"),
-                    "comment": data.get("comment"),
+                    "comment": quant_comment,
                     "attempt_no": extraction_no,
                     "detail_data": data,
                     "performers": [{"raw_name": data.get("quant_performer"), "role": "quant"}],
@@ -547,6 +551,7 @@ def registry_event_specs(event: dict[str, Any]) -> list[dict[str, Any]]:
                 "comment": data.get("comment"),
                 "attempt_no": data.get("attempt_no") or None,
                 "detail_data": {
+                    "genotype": data.get("genotype"),
                     "analysis_date": data.get("analysis_date"),
                     "status": data.get("result_status"),
                 },
@@ -606,6 +611,8 @@ async def write_registry_stage_events(
                 deferred_specs.append((event, spec))
 
     stage_types = {spec["stage_type"] for spec in sample_prep_specs}
+    if clean_text(row.get("registry_filled_by")):
+        stage_types.add("sample_prep")
     stage_types.update(spec["stage_type"] for _, spec in deferred_specs)
     deleted = await delete_registry_stage_events(session, obj.id, blocks, stage_types)
     if deleted:

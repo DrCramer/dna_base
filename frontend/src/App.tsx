@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useState } from 'react'
 import { api } from './api/client'
 import { Shell } from './components/Shell'
+import { LoadingState } from './components/ui'
 import { DashboardPage } from './pages/DashboardPage'
 import { ExportPage } from './pages/ExportPage'
 import { LoginPage } from './pages/LoginPage'
@@ -197,7 +198,7 @@ export function App() {
     }
     setView('reports')
   }, [])
-  if (isLoading) return <div className="loading">Загрузка...</div>
+  if (isLoading) return <main className="app-bootstrap-state"><LoadingState title="Запуск ДНК-реестра..." rows={4} /></main>
   if (!user) return <LoginPage onLogin={(username, password) => login.mutateAsync({ username, password }).then(() => undefined)} />
   let page = <DashboardPage onPartyOpen={openParty} onReportsOpen={openReports} />
   if (objectId) page = <ObjectDetailPage id={objectId} user={user} onBack={() => setObjectId(null)} onPartyOpen={openParty} />

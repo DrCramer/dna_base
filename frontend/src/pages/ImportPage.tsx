@@ -3,7 +3,7 @@ import { Check, Search, X } from 'lucide-react'
 import { Fragment, useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { CommitResponse, ElectrophoresisPdfPreview, RegistryPreview, RtCommitResponse, RtPreview } from '../api/types'
-import { FileDropzone, MultiPartyPicker, PageHeader } from '../components/ui'
+import { FileDropzone, LoadingState, MultiPartyPicker, PageHeader } from '../components/ui'
 
 type RegistryImportStatus = 'pending' | 'previewing' | 'ready' | 'blocked' | 'committing' | 'done' | 'error'
 type RegistryImportPhase = 'idle' | 'previewing' | 'committing' | 'done'
@@ -156,9 +156,7 @@ function RecentImports() {
         </div>
       </div>
       {latest.isLoading ? (
-        <div className="mini-table">
-          {Array.from({ length: 3 }, (_, index) => <div key={index}><span>Загрузка...</span><span>—</span><span>—</span></div>)}
-        </div>
+        <LoadingState title="Загрузка истории импортов..." rows={3} />
       ) : rows.length ? (
         <div className="recent-imports-table">
           <div className="recent-imports-row recent-imports-head">

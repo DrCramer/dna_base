@@ -323,7 +323,7 @@ export function ReportsPage({ user, onPartyOpen }: { user: User; onPartyOpen: (p
               ['control_need_recall', 'Надо отозвать'],
               ['control_recalled', 'Отозваны'],
               ['empty_control', 'Без заполненного контроля']
-            ].map(([key, label]) => <button key={key} className={filters.quick === key ? 'active' : ''} onClick={() => updateFilter('quick', key)}>{label}</button>)}
+            ].map(([key, label]) => <button key={key} className={filters.quick === key ? 'active' : ''} onClick={() => updateFilter('quick', key)}>{label}<span>{control.data?.quick_counts?.[key] ?? '—'}</span></button>)}
           </div>
           {control.isLoading ? <LoadingState title="Загрузка контроля партий..." rows={7} /> : <ControlTable rows={control.data?.items ?? []} onPartyOpen={onPartyOpen} />}
         </section>
@@ -345,7 +345,7 @@ export function ReportsPage({ user, onPartyOpen }: { user: User; onPartyOpen: (p
               ['control_pdf', 'Контрольные PDF'],
               ['no_biomaterial', 'Нет биоматериала'],
               ['burnt_bone', 'Горелая кость']
-            ].map(([key, label]) => <button key={key} className={filters.quick === key ? 'active' : ''} onClick={() => updateFilter('quick', key)}>{label}</button>)}
+            ].map(([key, label]) => <button key={key} className={filters.quick === key ? 'active' : ''} onClick={() => updateFilter('quick', key)}>{label}<span>{progress.data?.quick_counts?.[key] ?? '—'}</span></button>)}
           </div>
           {progress.isLoading ? <LoadingState title="Загрузка хода работы..." rows={7} /> : <PartyProgressTable rows={progress.data?.items ?? []} onPartyOpen={onPartyOpen} />}
         </section>

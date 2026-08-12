@@ -394,6 +394,16 @@ async def get_party_control_report(session: AsyncSession, filters: ReportFilters
         rows = [row for row in rows if row["object_count"] > 0]
     if filters.only_problematic:
         rows = [row for row in rows if row["problem_count"] > 0 or row["control_status"] == "Нет данных"]
+    quick_counts = {
+        "": len(rows),
+        "problem": sum(1 for row in rows if row["problem_count"] > 0),
+        "critical": sum(1 for row in rows if row["control_status"] == "Критично"),
+        "empty_control": sum(1 for row in rows if row["control_status"] == "Нет данных"),
+        **{
+            field: sum(1 for row in rows if _filled(row.get(field)))
+            for field in CONTROL_FIELDS
+        },
+    }
     quick = quick or ""
     if quick == "problem":
         rows = [row for row in rows if row["problem_count"] > 0]
@@ -404,12 +414,18 @@ async def get_party_control_report(session: AsyncSession, filters: ReportFilters
     elif quick == "empty_control":
         rows = [row for row in rows if row["control_status"] == "Нет данных"]
     sorted_rows = _sort_rows(rows, filters, default="problem_count")
-    return {"items": _page_rows(sorted_rows, filters)["items"], "total": len(rows), "page": filters.page, "page_size": filters.page_size}
+    return {
+        "items": _page_rows(sorted_rows, filters)["items"],
+        "total": len(rows),
+        "page": filters.page,
+        "page_size": filters.page_size,
+        "quick_counts": quick_counts,
+    }
 
 
 async def get_work_progress_report(session: AsyncSession, filters: ReportFilters, quick: str | None = None) -> dict[str, Any]:
     rows = await _party_rows(session, filters)
-    quick_stage = {
+    quick_stage_map = {
         "no_sample_prep": "sample_prep",
         "no_milling": "milling",
         "no_extraction": "dna_extraction",
@@ -417,7 +433,29 @@ async def get_work_progress_report(session: AsyncSession, filters: ReportFilters
         "no_pcr": "pcr",
         "no_electrophoresis": "electrophoresis",
         "no_analysis": "analysis",
-    }.get(quick or "")
+    }
+    party_ids = [row["party_id"] for row in rows]
+    pdf_parties = await _parties_with_pdf(session, party_ids, controls=False)
+    control_pdf_parties = await _parties_with_pdf(session, party_ids, controls=True)
+    quick_counts = {
+        "": len(rows),
+        **{
+            quick_key: sum(
+                1 for row in rows
+                if row["stage_progress"][stage]["done"] < row["object_count"]
+            )
+            for quick_key, stage in quick_stage_map.items()
+        },
+        "repeat_analysis": sum(
+            1 for row in rows
+            if row["stage_counts"].get("analysis", 0) and row["repeat_stage_objects"] > 0
+        ),
+        "no_biomaterial": sum(1 for row in rows if row["no_biomaterial_count"] > 0),
+        "burnt_bone": sum(1 for row in rows if row["burnt_bone_count"] > 0),
+        "pdf": sum(1 for row in rows if row["party_id"] in pdf_parties),
+        "control_pdf": sum(1 for row in rows if row["party_id"] in control_pdf_parties),
+    }
+    quick_stage = quick_stage_map.get(quick or "")
     if quick_stage:
         rows = [row for row in rows if row["stage_progress"][quick_stage]["done"] < row["object_count"]]
     elif quick == "repeat_analysis":
@@ -427,13 +465,11 @@ async def get_work_progress_report(session: AsyncSession, filters: ReportFilters
     elif quick == "burnt_bone":
         rows = [row for row in rows if row["burnt_bone_count"] > 0]
     elif quick == "pdf":
-        pdf_parties = await _parties_with_pdf(session, [row["party_id"] for row in rows], controls=False)
         rows = [row for row in rows if row["party_id"] in pdf_parties]
     elif quick == "control_pdf":
-        pdf_parties = await _parties_with_pdf(session, [row["party_id"] for row in rows], controls=True)
-        rows = [row for row in rows if row["party_id"] in pdf_parties]
+        rows = [row for row in rows if row["party_id"] in control_pdf_parties]
     sorted_rows = _sort_rows(rows, filters, default="readiness_percent")
-    return _page_rows(sorted_rows, filters)
+    return {**_page_rows(sorted_rows, filters), "quick_counts": quick_counts}
 
 
 async def _parties_with_pdf(session: AsyncSession, party_ids: list[int], controls: bool) -> set[int]:

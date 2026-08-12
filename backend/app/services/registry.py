@@ -189,16 +189,19 @@ def _preview_case_year(rows: list[dict[str, Any]]) -> int:
 
 def registry_quality_warnings(rows: list[dict[str, Any]]) -> list[str]:
     warnings: list[str] = []
-    bad_analysis = 0
+    analysis_without_date = 0
     for row in rows:
         for event in row.get("stage_events", []):
             if event.get("table") != "electrophoresis_analysis_events":
                 continue
             data = event.get("data") or {}
             if not data.get("analysis_date"):
-                bad_analysis += 1
-    if bad_analysis:
-        warnings.append(f"Пропущены некорректные строки анализа без даты: {bad_analysis}.")
+                analysis_without_date += 1
+    if analysis_without_date:
+        warnings.append(
+            f"Найдены попытки анализа без даты: {analysis_without_date}. "
+            "Заполненные исполнители и другие значения будут сохранены."
+        )
     return warnings
 
 
@@ -266,6 +269,8 @@ async def _write_legacy_stage_events(
         model = STAGE_MODELS.get(event.get("table"))
         if model is None:
             continue
+        allowed_fields = {column.name for column in model.__table__.columns} - {"id", "object_id"}
+        event_data = {key: value for key, value in (event.get("data") or {}).items() if key in allowed_fields}
         raw_json = {
             **event.get("raw_json", {}),
             "source": "registry_excel",
@@ -275,7 +280,7 @@ async def _write_legacy_stage_events(
             "source_row_number": row.get("source_row_number"),
             "source_sheet_name": row.get("source_sheet_name"),
         }
-        session.add(model(object_id=obj.id, **event.get("data", {}), raw_json=raw_json))
+        session.add(model(object_id=obj.id, **event_data, raw_json=raw_json))
         written += 1
     return written
 
@@ -713,7 +718,7 @@ async def repair_registry_stage_events(
             deleted = await delete_registry_stage_events(session, obj.id, set(), REPAIR_STAGE_TYPES)
             row_events = _repair_row_stage_events(row)
             written = 0
-            if row_events:
+            if row_events or row.get("registry_filled_by"):
                 repair_row = {**row, "stage_events": row_events}
                 written = await write_registry_stage_events(session, obj, repair_row, batch, batch.file_sha256, user)
             stats["objects_matched"] += 1

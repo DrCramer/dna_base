@@ -95,21 +95,36 @@ FIELD_ALIASES = {
     "intake_date": ["дата поступления в рцсмэ", "дата поступления в рцсме"],
     "decision_date": ["дата постановления"],
     "investigator": ["следователь"],
-    "incoming_no": ["номер вх"],
+    "incoming_no": ["номер вх", "номер входящий"],
     "decree_no": ["номер постановления"],
-    "object_description": ["комментарий подробное описание объекта"],
+    "object_description": [
+        "комментарий подробное описание объекта",
+        "описание комментарий",
+        "описание объекта",
+    ],
     "external_military_no": [
         "номер присвоенный в в ч номер 522 цпооп северо-кавказского военного округа г ростов-на-дону",
         "номер присвоенный в в ч номер 522 цпооп северо кавказского военного округа г ростов на дону",
+        "номер в в ч номер 522",
+        "номер в в ч номер522",
+        "номер в в ч 522",
     ],
     "extraction_note": ["выделяем"],
     "box_no": ["коробка"],
-    "packages_count": ["кол-во пакетов на 1 объект", "кол во пакетов на 1 объект"],
+    "packages_count": [
+        "кол-во пакетов на 1 объект",
+        "кол во пакетов на 1 объект",
+        "количество пакетов на 1 объект",
+    ],
     "rcsme_reg_no": ["номер рег рцсмэ", "номер рег рцсме"],
     "object_type": ["тип объекта заполняется брисевой а с"],
     "extracted_before": ["ранее выделяли"],
     "not_extracted_before": ["не выделяли ранее"],
-    "registry_filled_by": ["заполнение реестра исполнитель"],
+    "registry_filled_by": [
+        "заполнение реестра исполнитель",
+        "заполнение реестра",
+        "исполнитель заполнения реестра",
+    ],
 }
 
 
@@ -278,7 +293,7 @@ def _analysis_pair_data(row: list[Any], date_idx: int, performer_idx: int | None
     performer = clean_text(row_value(row, performer_idx)) if performer_idx is not None else None
     if performer and _is_bad_analysis_performer(performer):
         performer = None
-    if not analysis_date:
+    if not analysis_date and not performer:
         return None
     return {
         "analysis_date": analysis_date,
@@ -358,6 +373,8 @@ def _extract_stage_events(headers: list[str], row: list[Any]) -> list[dict[str, 
                 "quant_performer": clean_text(row_value(row, 32)),
                 "pipetting_method": clean_text(row_value(row, 33)),
                 "comment": clean_text(row_value(row, 34)),
+                "extraction_comment": None,
+                "quant_comment": clean_text(row_value(row, 34)),
             },
         ),
         (
@@ -373,6 +390,8 @@ def _extract_stage_events(headers: list[str], row: list[Any]) -> list[dict[str, 
                 "quant_performer": clean_text(row_value(row, 41)),
                 "pipetting_method": clean_text(row_value(row, 42)),
                 "comment": _join_comment(clean_text(row_value(row, 38)), clean_text(row_value(row, 43))),
+                "extraction_comment": clean_text(row_value(row, 38)),
+                "quant_comment": clean_text(row_value(row, 43)),
             },
         ),
     ]
@@ -424,16 +443,23 @@ def _extract_stage_events(headers: list[str], row: list[Any]) -> list[dict[str, 
     if electrophoresis:
         events.append(electrophoresis)
 
+    genotype = clean_text(row_value(row, electrophoresis_start + 5))
+    genotype_raw_index = electrophoresis_start + 6
     analysis_date_indexes = _find_headers(headers, "дата анализа фореза", start=electrophoresis_start + 6)
+    analysis_written = 0
     for attempt_no, date_idx in enumerate(analysis_date_indexes, start=1):
         performer_idx = date_idx + 1 if normalize_header(row_value(headers, date_idx + 1)) == "исполнитель" else None
         analysis_data = _analysis_pair_data(row, date_idx, performer_idx)
         if not analysis_data:
             continue
+        if analysis_written == 0:
+            analysis_data["genotype"] = genotype
         analysis_data["attempt_no"] = attempt_no
         indexes = [date_idx + 1]
         if performer_idx is not None:
             indexes.append(performer_idx + 1)
+        if analysis_written == 0 and genotype:
+            indexes.append(genotype_raw_index)
         analysis = _event(
             "electrophoresis_analysis_events",
             f"electrophoresis_analysis_{attempt_no}",
@@ -441,6 +467,26 @@ def _extract_stage_events(headers: list[str], row: list[Any]) -> list[dict[str, 
             headers,
             row,
             indexes,
+        )
+        if analysis:
+            events.append(analysis)
+            analysis_written += 1
+
+    if genotype and analysis_written == 0:
+        analysis = _event(
+            "electrophoresis_analysis_events",
+            "electrophoresis_analysis_1",
+            {
+                "analysis_date": None,
+                "performer": None,
+                "result_status": None,
+                "comment": None,
+                "genotype": genotype,
+                "attempt_no": 1,
+            },
+            headers,
+            row,
+            [genotype_raw_index],
         )
         if analysis:
             events.append(analysis)

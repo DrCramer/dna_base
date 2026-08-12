@@ -8,7 +8,7 @@ from openpyxl import load_workbook
 from app.parsers.normalization import parse_date
 from app.parsers.normalization import extract_party_no
 from app.parsers.registration_list import parse_registration_list
-from app.parsers.registry import REGISTRY_HEADERS, parse_registry
+from app.parsers.registry import REGISTRY_HEADERS, _extract_stage_events, _header_indexes, parse_registry
 from app.services.export import build_registry_workbook
 from app.services.stages import _merge_sample_prep_specs, registry_event_specs
 
@@ -232,6 +232,60 @@ def test_sample_prep_merge_uses_row_level_registry_filled_by():
     assert merged["detail_data"]["registry_filled_by"] == "Нечитайлова Н.А."
     assert merged["detail_data"]["photo_performers"] == ["Нечитайлова Н.А."]
     assert merged["detail_data"]["washing_performers"] == ["Давыдов В.Е."]
+
+
+def test_sample_prep_merge_creates_event_from_registry_filled_by_only():
+    merged = _merge_sample_prep_specs([], "Нечитайлова Н.А.")
+
+    assert merged
+    assert merged["stage_type"] == "sample_prep"
+    assert merged["detail_data"]["registry_filled_by"] == "Нечитайлова Н.А."
+    assert merged["detail_data"]["photo_performers"] == []
+
+
+def test_registry_parser_accepts_short_registry_filled_by_header():
+    indexes = _header_indexes(["№ постановления", "№ рег РЦСМЭ", "Заполнение реестра"])
+
+    assert indexes["registry_filled_by"] == 2
+
+
+def test_registry_analysis_preserves_genotype_and_performer_without_date():
+    headers = list(REGISTRY_HEADERS)
+    row = [None] * len(headers)
+    electrophoresis_start = headers.index("Дата электрофореза")
+    analysis_start = headers.index("Дата анализа фореза")
+    row[electrophoresis_start + 5] = "GT-01"
+    row[analysis_start + 1] = "Иванов И.И."
+
+    events = _extract_stage_events(headers, row)
+    analysis = next(event for event in events if event["table"] == "electrophoresis_analysis_events")
+    spec = registry_event_specs(analysis)[0]
+
+    assert analysis["data"]["analysis_date"] is None
+    assert analysis["data"]["performer"] == "Иванов И.И."
+    assert analysis["data"]["genotype"] == "GT-01"
+    assert spec["detail_data"]["genotype"] == "GT-01"
+    assert spec["performers"] == [{"raw_name": "Иванов И.И.", "role": "analysis"}]
+
+
+def test_registry_keeps_extraction_and_realtime_comments_in_their_own_stages():
+    headers = list(REGISTRY_HEADERS)
+    row = [None] * len(headers)
+    row[34] = "Комментарий RealTime 1"
+    row[38] = "Комментарий выделения 2"
+    row[43] = "Комментарий RealTime 2"
+
+    events = _extract_stage_events(headers, row)
+    extraction_1 = next(event for event in events if event["block"] == "dna_extraction_1")
+    extraction_2 = next(event for event in events if event["block"] == "dna_extraction_2")
+    specs_1 = registry_event_specs(extraction_1)
+    specs_2 = registry_event_specs(extraction_2)
+
+    assert [spec["stage_type"] for spec in specs_1] == ["realtime"]
+    assert specs_1[0]["comment"] == "Комментарий RealTime 1"
+    assert [spec["stage_type"] for spec in specs_2] == ["dna_extraction", "realtime"]
+    assert specs_2[0]["comment"] == "Комментарий выделения 2"
+    assert specs_2[1]["comment"] == "Комментарий RealTime 2"
 
 
 def test_registration_list_parser_reads_party_columns():

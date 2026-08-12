@@ -21,6 +21,7 @@ import type {
   RegistrationListCommitResponse,
   RegistrationListPreview,
   RegistryObject,
+  RegistryExportPreview,
   RegistryPreview,
   ReferenceItem,
   RtCommitResponse,
@@ -77,6 +78,32 @@ function reportParams(filters: Record<string, string | number | boolean | null |
     if (value === undefined || value === null || value === '') return
     params.set(key, String(value))
   })
+  return params
+}
+
+export type RegistryExportOptions = {
+  q?: string
+  partyNo?: string | null
+  partyIds?: number[]
+  objectIds?: number[]
+  objectNos?: string
+  year?: number | null
+  stageType?: string | null
+  includeArchived?: boolean
+  onlyProblematic?: boolean
+}
+
+function registryExportParams(options: RegistryExportOptions) {
+  const params = new URLSearchParams()
+  if (options.q) params.set('q', options.q)
+  if (options.partyNo) params.set('party_no', options.partyNo)
+  if (options.partyIds) params.set('party_ids', options.partyIds.join(','))
+  if (options.objectIds) params.set('object_ids', options.objectIds.join(','))
+  if (options.objectNos !== undefined) params.set('object_nos', options.objectNos)
+  if (options.year) params.set('year', String(options.year))
+  if (options.stageType) params.set('stage_type', options.stageType)
+  if (options.includeArchived) params.set('include_archived', 'true')
+  if (options.onlyProblematic) params.set('only_problematic', 'true')
   return params
 }
 
@@ -308,11 +335,12 @@ export const api = {
   rcsmeFixApply: () => request<RcsmeFixApplyResponse>('/imports/registry/rcsme-fix/apply', { method: 'POST' }),
   electrophoresisFileUrl: (id: number | string, download = false) =>
     requestUrl(firstApiBase(), `/electrophoresis-files/${id}${download ? '?download=true' : ''}`),
-  exportRegistryUrl: (q: string, partyNo?: string | null, year?: number | null) => {
-    const params = new URLSearchParams()
-    if (q) params.set('q', q)
-    if (partyNo) params.set('party_no', partyNo)
-    if (year) params.set('year', String(year))
-    return `${API}/exports/registry.xlsx?${params.toString()}`
+  exportRegistryPreview: (options: RegistryExportOptions) =>
+    request<RegistryExportPreview>(`/exports/registry/preview?${registryExportParams(options).toString()}`),
+  exportRegistryUrl: (optionsOrQuery: RegistryExportOptions | string, partyNo?: string | null, year?: number | null) => {
+    const options = typeof optionsOrQuery === 'string'
+      ? { q: optionsOrQuery, partyNo, year }
+      : optionsOrQuery
+    return `${API}/exports/registry.xlsx?${registryExportParams(options).toString()}`
   }
 }

@@ -358,6 +358,7 @@ def _base_values(
         "object_type": obj.object_type or (parent.object_type if parent else None),
         "extracted_before": obj.extracted_before or (parent.extracted_before if parent else None),
         "not_extracted_before": obj.not_extracted_before or (parent.not_extracted_before if parent else None),
+        "registry_filled_by": obj.registry_filled_by or (parent.registry_filled_by if parent else None),
         "object_description": description,
         "no_object": object_is_no_object(obj, no_object_control_numbers),
         "no_decree": object_is_no_decree(obj, no_decree_control_numbers),

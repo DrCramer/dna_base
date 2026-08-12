@@ -228,6 +228,11 @@ export interface PartyYears {
   default_year: number | null
 }
 
+export interface RegistryExportPreview {
+  object_count: number
+  party_count: number
+}
+
 export interface PartyProgress {
   party_id: number
   object_count: number
@@ -550,6 +555,7 @@ export interface ReportOverview {
   total: number
   page: number
   page_size: number
+  quick_counts?: Record<string, number>
 }
 
 export interface PartyControlReportRow {
@@ -575,6 +581,7 @@ export interface PartyControlReport {
   total: number
   page: number
   page_size: number
+  quick_counts?: Record<string, number>
 }
 
 export interface PeriodStatisticsRow {
