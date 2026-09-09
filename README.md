@@ -107,12 +107,56 @@ docker compose logs -f backend
 docker compose logs -f frontend
 ```
 
-Обновить приложение после новых коммитов:
+## Обновление сервера через GitHub
+
+Обычное обновление выполняется из каталога проекта:
 
 ```bash
-git pull
+cd ~/dna_base
+git status --short
+git branch --show-current
+git pull --ff-only origin main
 docker compose up -d --build
+docker compose ps
 ```
+
+Если Docker на сервере доступен только через `sudo`, используйте
+`sudo docker compose` во всех командах выше.
+
+Что происходит при обновлении:
+
+- `git pull --ff-only origin main` загружает последнюю версию из ветки `main` на GitHub;
+- `docker compose up -d --build` пересобирает изменившиеся образы и перезапускает контейнеры;
+- backend автоматически выполняет `alembic upgrade head`, поэтому миграции базы применяются при запуске;
+- файл `.env`, база PostgreSQL и загруженные файлы находятся вне Git и при обычном обновлении не удаляются.
+
+Не копируйте `.env.example` поверх существующего `.env`: пример нужен только при
+первом запуске. После появления новых настроек сравните файлы и добавьте только
+недостающие строки вручную.
+
+Проверить установленную версию и работу сервиса:
+
+```bash
+git log -1 --oneline
+curl -f http://127.0.0.1:4001/health
+docker compose logs --tail=100 backend frontend
+```
+
+Ожидаемый ответ проверки: `{"status":"ok"}`. Если интерфейс после обновления
+выглядит по-старому, выполните жёсткое обновление страницы в браузере:
+`Ctrl+F5` или `Ctrl+Shift+R`.
+
+Перед крупным обновлением можно сделать резервную копию базы:
+
+```bash
+mkdir -p backups
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' \
+  > "backups/dna_registry_$(date +%Y-%m-%d_%H-%M).sql"
+```
+
+Если `git status --short` показывает изменённые файлы проекта, сначала разберитесь
+с этими изменениями. Не используйте `git reset --hard`, чтобы случайно не потерять
+локальные правки.
 
 ## Production admin
 
