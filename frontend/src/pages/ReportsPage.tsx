@@ -34,7 +34,7 @@ const kpiLabels: Record<string, string> = {
   objects_with_repeat_stages: 'Объектов с повторными этапами',
   objects_no_object: 'Объектов "Нет объекта"',
   objects_no_decree: 'Объектов "Нет постановления"',
-  objects_no_biomaterial: 'Объектов "Нет биоматериала"',
+  objects_no_biomaterial: 'Объектов "Пустой конверт"',
   objects_burnt_bone: 'Объектов "Горелая кость"'
 }
 
@@ -343,7 +343,7 @@ export function ReportsPage({ user, onPartyOpen }: { user: User; onPartyOpen: (p
               ['repeat_analysis', 'Повторные анализы'],
               ['pdf', 'PDF фореза'],
               ['control_pdf', 'Контрольные PDF'],
-              ['no_biomaterial', 'Нет биоматериала'],
+              ['no_biomaterial', 'Пустой конверт'],
               ['burnt_bone', 'Горелая кость']
             ].map(([key, label]) => <button key={key} className={filters.quick === key ? 'active' : ''} onClick={() => updateFilter('quick', key)}>{label}<span>{progress.data?.quick_counts?.[key] ?? '—'}</span></button>)}
           </div>

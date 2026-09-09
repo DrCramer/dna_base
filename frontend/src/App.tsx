@@ -67,7 +67,7 @@ export function App() {
   const [objectId, setObjectId] = useState<number | null>(null)
   const [objectsQuery, setObjectsQuery] = useState('')
   const [partyFilter, setPartyFilter] = useState<string | null>(null)
-  const [partySelect, setPartySelect] = useState<string | null>(null)
+  const [partySelect, setPartySelect] = useState<{ partyNo: string; caseYear?: number | null } | null>(null)
   const [themeMode, setThemeMode] = useState<ThemeMode>(storedThemeMode)
   const [effectiveTheme, setEffectiveTheme] = useState<EffectiveTheme>(() => themeMode === 'auto' ? systemTheme() : themeMode)
   const [uiScale, setUiScale] = useState(storedUiScale)
@@ -180,9 +180,9 @@ export function App() {
     setPartyFilter(partyNo)
     setView('objects')
   }, [objectId, objectsQuery, partyFilter, view])
-  const openPartyInParties = useCallback((partyNo: string) => {
+  const openPartyInParties = useCallback((partyNo: string, caseYear?: number | null) => {
     setObjectId(null)
-    setPartySelect(partyNo)
+    setPartySelect({ partyNo, caseYear })
     setView('parties')
   }, [])
   const openReports = useCallback((tab = 'overview', extraParams?: Record<string, string | number | boolean | null | undefined>) => {
@@ -200,10 +200,10 @@ export function App() {
   }, [])
   if (isLoading) return <main className="app-bootstrap-state"><LoadingState title="Запуск ДНК-реестра..." rows={4} /></main>
   if (!user) return <LoginPage onLogin={(username, password) => login.mutateAsync({ username, password }).then(() => undefined)} />
-  let page = <DashboardPage onPartyOpen={openParty} onReportsOpen={openReports} />
+  let page = <DashboardPage onPartyOpen={openPartyInParties} onReportsOpen={openReports} />
   if (objectId) page = <ObjectDetailPage id={objectId} user={user} onBack={() => setObjectId(null)} onPartyOpen={openParty} />
-  else if (view === 'dashboard') page = <DashboardPage onPartyOpen={openParty} onReportsOpen={openReports} />
-  else if (view === 'parties') page = <PartiesPage user={user} onObjectOpen={setObjectId} onReportsOpen={openReports} initialPartyNo={partySelect} onInitialPartyHandled={() => setPartySelect(null)} />
+  else if (view === 'dashboard') page = <DashboardPage onPartyOpen={openPartyInParties} onReportsOpen={openReports} />
+  else if (view === 'parties') page = <PartiesPage user={user} onObjectOpen={setObjectId} onReportsOpen={openReports} initialPartyNo={partySelect?.partyNo} initialPartyYear={partySelect?.caseYear} onInitialPartyHandled={() => setPartySelect(null)} />
   else if (view === 'objects') page = <ObjectsPage initialQuery={objectsQuery} partyFilter={partyFilter} onQueryChange={setObjectsQuery} onPartyFilterChange={setPartyFilter} onOpen={setObjectId} onPartyOpen={openParty} />
   else if (view === 'work-sessions') page = <WorkSessionsPage user={user} />
   else if (view === 'search') page = <SearchPage onObjectOpen={setObjectId} onPartyOpen={openPartyInParties} />

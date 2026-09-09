@@ -47,6 +47,9 @@ class ObjectBase(BaseModel):
     extracted_before: str | None = None
     not_extracted_before: str | None = None
     registry_filled_by: str | None = None
+    empty_envelope: bool = False
+    is_consumed: bool = False
+    novosib: bool = False
     status: str | None = None
 
 

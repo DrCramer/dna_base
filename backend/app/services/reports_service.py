@@ -104,7 +104,7 @@ def _is_burnt_bone(description: str | None) -> bool:
 
 def _is_no_biomaterial(description: str | None) -> bool:
     text = (description or "").casefold()
-    return "нет биоматериала" in text
+    return "нет биоматериала" in text or "пустой конверт" in text
 
 
 def _numeric_party_no_expr():
@@ -261,7 +261,7 @@ async def _party_object_flags(session: AsyncSession, parties: list[Party], filte
             counters[party_id]["no_object"] += 1
         if no_decree:
             counters[party_id]["no_decree"] += 1
-        if _is_no_biomaterial(obj.object_description):
+        if obj.empty_envelope or _is_no_biomaterial(obj.object_description):
             counters[party_id]["no_biomaterial"] += 1
         if _is_burnt_bone(obj.object_description):
             counters[party_id]["burnt_bone"] += 1

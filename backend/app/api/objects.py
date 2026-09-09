@@ -47,6 +47,9 @@ def _snapshot(obj: RegistryObject) -> dict[str, Any]:
         "status": obj.status,
         "object_type": obj.object_type,
         "box_no": obj.box_no,
+        "empty_envelope": obj.empty_envelope,
+        "is_consumed": obj.is_consumed,
+        "novosib": obj.novosib,
     }
 
 

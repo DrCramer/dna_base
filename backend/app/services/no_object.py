@@ -15,6 +15,7 @@ NO_OBJECT_MARKERS = (
     "объект отсутствует",
     "отсутствует объект",
     "нет биоматериала",
+    "пустой конверт",
 )
 
 
@@ -71,7 +72,15 @@ def object_decree_no(obj: RegistryObject) -> str | None:
 
 def object_is_no_object(obj: RegistryObject, control_numbers: set[str] | None = None) -> bool:
     by_control = any(control_token_matches_object(token, obj) for token in (control_numbers or set()))
-    return has_no_object_marker(object_description(obj)) or by_control
+    parent = obj.__dict__.get("parent_object") if obj.parent_object_id else None
+    empty_envelope = bool(obj.empty_envelope or (parent.empty_envelope if parent else False))
+    return empty_envelope or has_no_object_marker(object_description(obj)) or by_control
+
+
+def object_is_consumed(obj: RegistryObject) -> bool:
+    # A materialized repeat is a separate working row and can have its own
+    # remaining material even when the original object has been consumed.
+    return bool(obj.is_consumed)
 
 
 def object_is_no_decree(obj: RegistryObject, control_numbers: set[str] | None = None) -> bool:

@@ -19,7 +19,7 @@ from app.schemas import (
     StageTableResponse,
 )
 from app.services.audit import write_audit
-from app.services.no_object import object_is_no_object, party_no_object_controls
+from app.services.no_object import object_is_consumed, object_is_no_object, party_no_object_controls
 from app.services.stage_table import build_stage_table, public_to_canonical, select_stage_table_objects
 from app.services.stages import create_stage_event, update_stage_event_data
 
@@ -224,19 +224,22 @@ async def _selected_objects(
     return []
 
 
-async def _editable_stage_objects(session: AsyncSession, objects: list[RegistryObject], stage_type: str) -> tuple[list[RegistryObject], int]:
+async def _editable_stage_objects(session: AsyncSession, objects: list[RegistryObject], stage_type: str) -> tuple[list[RegistryObject], int, int]:
     if stage_type in ("registration", "all") or not objects:
-        return objects, 0
+        return objects, 0, 0
     party_ids = sorted({obj.party_id for obj in objects if obj.party_id})
     controls = await party_no_object_controls(session, party_ids)
     editable: list[RegistryObject] = []
-    blocked = 0
+    blocked_no_object = 0
+    blocked_consumed = 0
     for obj in objects:
         if object_is_no_object(obj, controls.get(obj.party_id or 0, set())):
-            blocked += 1
+            blocked_no_object += 1
+        elif stage_type != "sample_prep" and object_is_consumed(obj):
+            blocked_consumed += 1
         else:
             editable.append(obj)
-    return editable, blocked
+    return editable, blocked_no_object, blocked_consumed
 
 
 async def _existing_stage_counts(
@@ -320,7 +323,7 @@ async def preview_stage_events(
     if stage_type in ("registration", "all"):
         raise HTTPException(status_code=400, detail="Для этого представления нельзя создать этап")
     selected_objects = await _selected_objects(session, payload)
-    objects, blocked_count = await _editable_stage_objects(session, selected_objects, stage_type)
+    objects, blocked_count, consumed_count = await _editable_stage_objects(session, selected_objects, stage_type)
     existing_counts = await _existing_stage_counts(session, [obj.id for obj in objects], stage_type)
     next_attempts = [existing_counts.get(obj.id, 0) + 1 for obj in objects] or [1]
     warnings = []
@@ -328,6 +331,8 @@ async def preview_stage_events(
         warnings.append("Не выбраны объекты для массового заполнения.")
     if blocked_count:
         warnings.append(f"Пропущено объектов с отметкой «Нет объекта»: {blocked_count}.")
+    if consumed_count:
+        warnings.append(f"Пропущено полностью израсходованных объектов: {consumed_count}.")
     sample_party_ids = payload.party_ids
     if payload.object_ids:
         sample_party_ids = sorted({obj.party_id for obj in objects if obj.party_id})
@@ -363,10 +368,12 @@ async def apply_stage_events(
     if stage_type in ("registration", "all"):
         raise HTTPException(status_code=400, detail="Для этого представления нельзя создать этап")
     selected_objects = await _selected_objects(session, payload)
-    objects, blocked_count = await _editable_stage_objects(session, selected_objects, stage_type)
+    objects, blocked_count, consumed_count = await _editable_stage_objects(session, selected_objects, stage_type)
     if not objects:
         if blocked_count:
             raise HTTPException(status_code=400, detail="Все выбранные объекты помечены как «Нет объекта»")
+        if consumed_count:
+            raise HTTPException(status_code=400, detail="Все выбранные объекты полностью израсходованы")
         raise HTTPException(status_code=400, detail="Не выбраны объекты для массового заполнения")
     detail_data = _normalized_detail(stage_type, payload.detail_data)
     party_id = payload.party_ids[0] if len(payload.party_ids) == 1 else None
@@ -379,7 +386,7 @@ async def apply_stage_events(
         created_by_user_id=user.id,
             source=payload.source,
             status="applied",
-            raw_json={**payload.model_dump(mode="json"), "blocked_no_object_count": blocked_count},
+            raw_json={**payload.model_dump(mode="json"), "blocked_no_object_count": blocked_count, "blocked_consumed_count": consumed_count},
     )
     session.add(work_session)
     await session.flush()
@@ -464,6 +471,7 @@ async def apply_stage_events(
             "stage_events_updated": updated,
             "stage_type": stage_type,
             "blocked_no_object_count": blocked_count,
+            "blocked_consumed_count": consumed_count,
         },
     )
     await session.commit()
@@ -495,6 +503,8 @@ async def apply_inline_stage_event(
     controls = await party_no_object_controls(session, [obj.party_id] if obj.party_id else [])
     if object_is_no_object(obj, controls.get(obj.party_id or 0, set())):
         raise HTTPException(status_code=400, detail="Объект помечен как «Нет объекта». Ввод данных на последующих этапах заблокирован.")
+    if stage_type != "sample_prep" and object_is_consumed(obj):
+        raise HTTPException(status_code=400, detail="Объект полностью израсходован. Повторный ввод данных на последующих этапах заблокирован.")
     latest = await _latest_stage_event(session, obj.id, stage_type)
     normalized_patch = _normalized_detail(stage_type, payload.detail_data)
     detail_data = _merge_detail(_detail_from_event(latest, stage_type), normalized_patch)

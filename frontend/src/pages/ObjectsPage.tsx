@@ -11,7 +11,7 @@ type ObjectQuickFilter = 'no_object' | 'no_decree' | 'no_biomaterial' | 'burned'
 const objectQuickFilters: Array<{ id: ObjectQuickFilter; label: string }> = [
   { id: 'no_object', label: 'Нет объекта' },
   { id: 'no_decree', label: 'Нет постановления' },
-  { id: 'no_biomaterial', label: 'Нет биоматериала' },
+  { id: 'no_biomaterial', label: 'Пустой конверт' },
   { id: 'burned', label: 'Горелая кость' },
   { id: 'no_analysis', label: 'Без анализа' },
   { id: 'no_pcr', label: 'Без ПЦР' },
@@ -57,7 +57,7 @@ function hasQuickFilter(row: RegistryObjectListItemBase, filter: ObjectQuickFilt
     return hasAny(text, ['нет объекта', 'нет объект', 'без объекта', 'объект отсутствует', 'отсутствует объект'])
   }
   if (filter === 'no_decree') return !String(row.decree_no || '').trim()
-  if (filter === 'no_biomaterial') return hasAny(text, ['нет биоматериала', 'без биоматериала', 'биоматериал отсутствует'])
+  if (filter === 'no_biomaterial') return row.empty_envelope || hasAny(text, ['пустой конверт', 'нет биоматериала', 'без биоматериала', 'биоматериал отсутствует'])
   if (filter === 'burned') return hasAny(text, ['горелая кость', 'горел'])
   if (filter === 'no_analysis') return (row.stage_summary?.analysis?.count ?? 0) === 0
   if (filter === 'no_pcr') return (row.stage_summary?.pcr?.count ?? 0) === 0

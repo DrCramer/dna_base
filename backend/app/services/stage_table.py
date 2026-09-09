@@ -78,9 +78,9 @@ STAGE_COLUMNS: dict[str, list[tuple[str, str, str, bool, int]]] = {
         ("decree_no", "№ постановления", "text", False, 150),
         ("object_type", "Тип", "text", False, 160),
         ("box_no", "Коробка", "text", False, 90),
-        ("object_description", "Описание / комментарий", "text", True, 260),
+        ("object_description", "Описание", "text", True, 180),
         ("burnt_bone", "Горелая кость", "boolean", False, 120),
-        ("no_biomaterial", "Нет биоматериала", "boolean", False, 140),
+        ("novosib", "Новосиб", "boolean", False, 100),
         ("external_military_no", "№ присвоенный в в/ч № 522 ЦПООП Северо-Кавказского военного округа, г. Ростов-на-Дону", "text", False, 300),
         ("no_object", "Нет объекта", "boolean", False, 100),
         ("no_decree", "Нет постановления", "boolean", False, 120),
@@ -94,6 +94,8 @@ STAGE_COLUMNS: dict[str, list[tuple[str, str, str, bool, int]]] = {
         ("bone_tissue_date", "Дата размельчения / изъятия тканей", "date", True, 180),
         ("attempt_no", "Попытка", "number", False, 90),
         ("comment", "Комментарий", "text", True, 220),
+        ("empty_envelope", "Пустой конверт", "boolean", False, 130),
+        ("is_consumed", "Израсходовано", "boolean", False, 130),
     ],
     "milling": [
         *BASE_OBJECT_COLUMNS,
@@ -265,8 +267,9 @@ def _is_burnt_bone(description: str | None) -> bool:
     return "горел" in text and "кость" in text
 
 
-def _is_no_biomaterial(description: str | None) -> bool:
-    return "нет биоматериала" in (description or "").casefold()
+def _is_empty_envelope(description: str | None) -> bool:
+    text = (description or "").casefold()
+    return "нет биоматериала" in text or "пустой конверт" in text
 
 
 def _as_list(value: Any) -> list[str]:
@@ -363,7 +366,9 @@ def _base_values(
         "no_object": object_is_no_object(obj, no_object_control_numbers),
         "no_decree": object_is_no_decree(obj, no_decree_control_numbers),
         "burnt_bone": _is_burnt_bone(description),
-        "no_biomaterial": _is_no_biomaterial(description),
+        "empty_envelope": bool(obj.empty_envelope) or _is_empty_envelope(description),
+        "is_consumed": bool(obj.is_consumed),
+        "novosib": bool(obj.novosib),
         "is_repeat": is_repeat,
         "repeat_suffix": obj.repeat_suffix,
         "parent_rcsme_reg_no": parent.rcsme_reg_no if parent else None,
@@ -423,6 +428,9 @@ def _control_object_out(control: ElectrophoresisControlFile) -> ObjectListItemOu
         extracted_before=None,
         not_extracted_before=None,
         registry_filled_by=None,
+        empty_envelope=False,
+        is_consumed=False,
+        novosib=False,
         status="active",
         source_import_batch_id=None,
         source_sheet_name=None,
@@ -449,6 +457,9 @@ def _control_row(control: ElectrophoresisControlFile) -> StageTableRowOut:
         "no_object": False,
         "no_decree": False,
         "burnt_bone": False,
+        "empty_envelope": False,
+        "is_consumed": False,
+        "novosib": False,
         "control_type": label,
         "analysis_date": control.analysis_date.isoformat() if control.analysis_date else None,
         "analysis_performers": control.analysis_performer,

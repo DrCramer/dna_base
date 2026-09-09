@@ -15,6 +15,12 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
+def _default_convert_workers() -> int:
+    # LibreOffice is CPU and memory intensive. Four concurrent processes use
+    # multiple cores well without overwhelming typical 4-8 GB lab servers.
+    return max(1, min(os.cpu_count() or 1, 4))
+
+
 @dataclass
 class Settings:
     data_dir: Path = Path(os.getenv("PRINT_DATA_DIR", "/app/data/print"))
@@ -24,7 +30,7 @@ class Settings:
     max_single_file_mb: int = _int_env("PRINT_MAX_SINGLE_FILE_MB", 50)
     max_unpacked_mb: int = _int_env("PRINT_MAX_UNPACKED_MB", 1500)
     max_zip_depth: int = _int_env("PRINT_MAX_ZIP_DEPTH", 8)
-    convert_workers: int = _int_env("PRINT_CONVERT_WORKERS", 1)
+    convert_workers: int = _int_env("PRINT_CONVERT_WORKERS", _default_convert_workers())
     conversion_timeout_seconds: int = _int_env("PRINT_CONVERSION_TIMEOUT_SECONDS", 120)
     require_same_page_size: bool = os.getenv("PRINT_REQUIRE_SAME_PAGE_SIZE", "").lower() in {
         "1",

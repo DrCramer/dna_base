@@ -67,10 +67,16 @@ POSTGRES_USER=dna
 POSTGRES_PASSWORD=replace-with-a-strong-db-password
 SECRET_KEY=replace-with-a-long-random-secret
 PRINT_DATA_DIR=/app/data/print
+PRINT_CONVERT_WORKERS=auto
 APP_PORT=4001
 ```
 
 Для сервера обязательно поменяйте `POSTGRES_PASSWORD` и `SECRET_KEY`.
+
+`PRINT_CONVERT_WORKERS=auto` использует до четырёх параллельных процессов LibreOffice
+при сборке DOCX в PDF. На сервере с 8 CPU и 8 GB RAM рекомендуется оставить `auto`
+или явно указать `PRINT_CONVERT_WORKERS=4`. Увеличивать значение выше числа доступных
+ядер и выше `4` без запаса оперативной памяти не рекомендуется.
 
 Если нужен другой внешний порт:
 

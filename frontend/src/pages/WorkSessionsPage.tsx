@@ -169,6 +169,10 @@ function isNoObjectRow(row: StageTableRow) {
   return row.values.no_object === true
 }
 
+function isUnavailableRow(row: StageTableRow, stageType: string) {
+  return isNoObjectRow(row) || (stageType !== 'preparation' && row.values.is_consumed === true)
+}
+
 function protocolBlockDraft(block: WorkProtocolStageBlock): ProtocolBlockDraft {
   return {
     ...block,
@@ -379,7 +383,7 @@ export function WorkSessionsPage({ user }: { user: User }) {
   const rowsByObjectId = useMemo(() => new Map(rows.map((row) => [row.object.id, row])), [rows])
   const selectedObjectIds = Array.from(selectedRows).filter((id) => {
     const row = rowsByObjectId.get(id)
-    return !row || !isNoObjectRow(row)
+    return !row || !isUnavailableRow(row, stageType)
   })
 
   const payload = useMemo<StageEventsPreviewRequest>(() => {
@@ -523,7 +527,7 @@ export function WorkSessionsPage({ user }: { user: User }) {
   }
 
   function toggleRow(row: StageTableRow) {
-    if (isNoObjectRow(row)) return
+    if (isUnavailableRow(row, stageType)) return
     const id = row.object.id
     setSelectedRows((prev) => {
       const next = new Set(prev)
@@ -559,7 +563,7 @@ export function WorkSessionsPage({ user }: { user: User }) {
       }
       seen.add(normalized)
       const row = byNumber.get(normalized)
-      if (row && !isNoObjectRow(row)) found.add(row.object.id)
+      if (row && !isUnavailableRow(row, stageType)) found.add(row.object.id)
       else missing.push(raw)
     }
     setSelectedRows(found)
@@ -985,16 +989,17 @@ export function WorkSessionsPage({ user }: { user: User }) {
         <h2>Объекты выбранных партий</h2>
         <div className="mass-object-table">
           <div className="mass-object-row mass-object-head">
-            <div></div><div>№ рег РЦСМЭ</div><div>Партия</div><div>Нет объекта</div><div>Нет постановления</div><div>Горелая кость</div><div>Тип</div><div>Попытка</div>
+            <div></div><div>№ рег РЦСМЭ</div><div>Партия</div><div>Нет объекта</div><div>Нет постановления</div><div>Горелая кость</div><div>Израсходовано</div><div>Тип</div><div>Попытка</div>
           </div>
           {rows.slice(0, 300).map((row) => (
             <div className={`mass-object-row ${isNoObjectRow(row) ? 'no-object-row' : ''}`} key={row.object.id}>
-              <div><input type="checkbox" checked={!isNoObjectRow(row) && selectedRows.has(row.object.id)} disabled={isNoObjectRow(row)} onChange={() => toggleRow(row)} /></div>
+              <div><input type="checkbox" checked={!isUnavailableRow(row, stageType) && selectedRows.has(row.object.id)} disabled={isUnavailableRow(row, stageType)} onChange={() => toggleRow(row)} /></div>
               <div>{String(row.values.rcsme_reg_no || row.object.rcsme_reg_no || '—')}</div>
               <div>{row.object.party_no || '—'}</div>
               <div>{isNoObjectRow(row) ? 'Да' : '—'}</div>
               <div>{row.values.no_decree === true ? 'Да' : '—'}</div>
               <div>{row.values.burnt_bone === true ? 'Да' : '—'}</div>
+              <div>{row.values.is_consumed === true ? 'Да' : '—'}</div>
               <div>{String(row.values.object_type || row.object.object_type || '—')}</div>
               <div>{row.attempt_no || '—'}</div>
             </div>

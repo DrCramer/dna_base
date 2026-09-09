@@ -111,6 +111,9 @@ async def ensure_repeat_object(
         extracted_before=parent.extracted_before,
         not_extracted_before=parent.not_extracted_before,
         registry_filled_by=parent.registry_filled_by,
+        empty_envelope=False,
+        is_consumed=False,
+        novosib=parent.novosib,
         status="active" if parent.status != "archived" else "new",
         raw_registry_json={
             "source": source,

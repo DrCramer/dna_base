@@ -300,9 +300,8 @@ function defaultHiddenColumns(stage: string) {
 }
 
 function orderVisibleColumns(stage: string, columns: StageTableColumn[]) {
-  const anchorKeys = stage === 'preparation'
-    ? ['object_description', 'burnt_bone', 'no_biomaterial', 'external_military_no', 'comment', 'no_object', 'no_decree']
-    : stage === 'registration'
+  if (stage === 'preparation') return columns
+  const anchorKeys = stage === 'registration'
       ? ['external_military_no', registrationActiveColumnKey, 'no_object', 'no_decree', 'burnt_bone']
       : ['no_object', 'no_decree', 'burnt_bone']
   const anchorColumns = anchorKeys
@@ -349,7 +348,7 @@ function formatDate(value: unknown) {
 }
 
 function formatCell(value: unknown, column?: StageTableColumn) {
-  if (column?.key === 'no_object' || column?.key === 'no_decree' || column?.key === 'burnt_bone' || column?.key === 'no_biomaterial' || column?.key === registrationActiveColumnKey) return value === true ? 'Да' : '—'
+  if (column?.key === 'no_object' || column?.key === 'no_decree' || column?.key === 'burnt_bone' || column?.key === 'empty_envelope' || column?.key === 'is_consumed' || column?.key === 'novosib' || column?.key === registrationActiveColumnKey) return value === true ? 'Да' : '—'
   if (column && realtimeQuantityKeys.has(column.key) && value === 'n/a') return 'n/a'
   if (column?.type === 'date') return formatDate(value)
   if (column?.key === 'source' && typeof value === 'string') return sourceLabels[value] || value
@@ -367,6 +366,18 @@ function isNoObjectRow(row: StageTableRow) {
 
 function isBlockedNoObjectStageRow(activeStage: string, row: StageTableRow) {
   return activeStage !== 'registration' && activeStage !== 'all' && isNoObjectRow(row)
+}
+
+function isConsumedRow(row: StageTableRow) {
+  return row.values.is_consumed === true || row.object.is_consumed === true
+}
+
+function isBlockedConsumedStageRow(activeStage: string, row: StageTableRow) {
+  return activeStage !== 'registration' && activeStage !== 'preparation' && activeStage !== 'all' && isConsumedRow(row)
+}
+
+function isBlockedStageRow(activeStage: string, row: StageTableRow) {
+  return isBlockedNoObjectStageRow(activeStage, row) || isBlockedConsumedStageRow(activeStage, row)
 }
 
 function isRepeatObjectRow(row: StageTableRow) {
@@ -580,7 +591,9 @@ function stageColumnTrack(column: StageTableColumn) {
   if (column.key === 'no_object') return '96px'
   if (column.key === 'no_decree') return '120px'
   if (column.key === 'burnt_bone') return '120px'
-  if (column.key === 'no_biomaterial') return '140px'
+  if (column.key === 'empty_envelope') return '130px'
+  if (column.key === 'is_consumed') return '130px'
+  if (column.key === 'novosib') return '100px'
   if (column.key === 'analysis_pdf') return '190px'
   if (column.key === 'decree_no') return '142px'
   if (column.key === 'external_military_no') return '130px'
@@ -593,7 +606,7 @@ function stageColumnTrack(column: StageTableColumn) {
   if (column.input === 'employee_multi') return `${clampWidth(column.width, 170, 220)}px`
   if (column.input === 'employee') return `${clampWidth(column.width, 150, 200)}px`
   if (column.input === 'dictionary') return `${clampWidth(column.width, 145, 190)}px`
-  if (column.key === 'object_description') return '250px'
+  if (column.key === 'object_description') return '180px'
   if (column.key === 'comment') return '210px'
   return `${clampWidth(column.width, 90, 220)}px`
 }
@@ -698,7 +711,9 @@ function StageGrid({
   onToggleNoObjectControl,
   onToggleNoDecreeControl,
   onToggleBurntBone,
-  onToggleNoBiomaterial,
+  onToggleEmptyEnvelope,
+  onToggleConsumed,
+  onToggleNovosib,
   onToggleRegistrationActive
 }: {
   columns: StageTableColumn[]
@@ -724,7 +739,9 @@ function StageGrid({
   onToggleNoObjectControl: (row: StageTableRow, checked: boolean) => void
   onToggleNoDecreeControl: (row: StageTableRow, checked: boolean) => void
   onToggleBurntBone: (row: StageTableRow, checked: boolean) => void
-  onToggleNoBiomaterial: (row: StageTableRow, checked: boolean) => void
+  onToggleEmptyEnvelope: (row: StageTableRow, checked: boolean) => void
+  onToggleConsumed: (row: StageTableRow, checked: boolean) => void
+  onToggleNovosib: (row: StageTableRow, checked: boolean) => void
   onToggleRegistrationActive: (row: StageTableRow, checked: boolean) => void
 }) {
   const [multiPicker, setMultiPicker] = useState<{ rowId: string; column: StageTableColumn; value: string[] } | null>(null)
@@ -774,7 +791,7 @@ function StageGrid({
     }
     return counts
   }, [allRows])
-  const selectableRows = rows.filter((row) => !isControlRow(row) && !isBlockedNoObjectStageRow(activeStage, row))
+  const selectableRows = rows.filter((row) => !isControlRow(row) && !isBlockedStageRow(activeStage, row))
   function openFilter(column: StageTableColumn) {
     const values = Array.from(new Set(allRows.map((row) => columnFilterValue(row, column)))).sort((a, b) => a.localeCompare(b, 'ru'))
     setFilterColumn(column)
@@ -819,13 +836,15 @@ function StageGrid({
           const analysisCount = stageAttemptCount(row)
           const controlRow = isControlRow(row)
           const blockedNoObjectRow = isBlockedNoObjectStageRow(activeStage, row)
+          const blockedConsumedRow = isBlockedConsumedStageRow(activeStage, row)
+          const blockedStageRow = blockedNoObjectRow || blockedConsumedRow
           const externalMilitaryNo = rowExternalMilitaryNo(row)
           const requiresPreciseControl = (externalMilitaryCounts.get(normalizeControlNo(externalMilitaryNo)) || 0) > 1
           const noObjectControlChecked = externalMilitaryNo ? controlSetHasRow(registrationNoObjectNumbers, row, requiresPreciseControl) : false
           const noDecreeControlChecked = externalMilitaryNo ? controlSetHasRow(registrationNoDecreeNumbers, row, requiresPreciseControl) : false
           return (
             <div
-              className={`stage-grid-row stage-grid-body-row${isNoObjectRow(row) || noObjectControlChecked ? ' no-object-row' : ''}${repeatRow ? ' repeat-object-row' : ''}${stageAttemptRepeatRow ? ' stage-attempt-repeat-row' : ''}${controlRow ? ' control-row' : ''}`}
+              className={`stage-grid-row stage-grid-body-row${isNoObjectRow(row) || noObjectControlChecked ? ' no-object-row' : ''}${isConsumedRow(row) ? ' consumed-object-row' : ''}${repeatRow ? ' repeat-object-row' : ''}${stageAttemptRepeatRow ? ' stage-attempt-repeat-row' : ''}${controlRow ? ' control-row' : ''}`}
               role="row"
               key={rowKey}
               style={rowStyle}
@@ -833,10 +852,10 @@ function StageGrid({
               <div className="stage-sticky-cell stage-select-sticky" style={{ left: 0 }} role="cell">
                 <input
                   type="checkbox"
-                  checked={!controlRow && !blockedNoObjectRow && selectedIds.has(row.object.id)}
-                  onChange={() => { if (!controlRow && !blockedNoObjectRow) onToggle(row.object.id) }}
-                  disabled={controlRow || blockedNoObjectRow}
-                  title={blockedNoObjectRow ? 'Объект помечен как «Нет объекта»' : undefined}
+                  checked={!controlRow && !blockedStageRow && selectedIds.has(row.object.id)}
+                  onChange={() => { if (!controlRow && !blockedStageRow) onToggle(row.object.id) }}
+                  disabled={controlRow || blockedStageRow}
+                  title={blockedNoObjectRow ? 'Объект помечен как «Нет объекта»' : blockedConsumedRow ? 'Объект полностью израсходован' : undefined}
                   aria-label={`Выбрать ${row.object.rcsme_reg_no || row.object.id}`}
                 />
               </div>
@@ -844,7 +863,7 @@ function StageGrid({
                 const draftValue = draft[column.key]
                 const hasDraft = Object.prototype.hasOwnProperty.call(draft, column.key)
                 const value = hasDraft ? draftValue : row.values[column.key]
-                const editable = !controlRow && !blockedNoObjectRow && canEdit && isStageEditable(activeStage, column)
+                const editable = !controlRow && !blockedStageRow && canEdit && isStageEditable(activeStage, column)
                 const registrationActiveChecked = registrationActiveIds.has(row.object.id)
                 return (
                   <div
@@ -889,16 +908,34 @@ function StageGrid({
                           onChange={(event) => onToggleBurntBone(row, event.target.checked)}
                         />
                       </label>
-                    ) : activeStage === 'preparation' && column.key === 'no_biomaterial' ? (
+                    ) : activeStage === 'preparation' && column.key === 'novosib' ? (
+                      <label className="no-object-checkbox" title="Отметить объект как «Новосиб»">
+                        <input
+                          type="checkbox"
+                          checked={value === true}
+                          disabled={!canEdit || controlRow || blockedNoObjectRow}
+                          onChange={(event) => onToggleNovosib(row, event.target.checked)}
+                        />
+                      </label>
+                    ) : activeStage === 'preparation' && column.key === 'empty_envelope' ? (
                       <label
                         className="no-object-checkbox"
-                        title="Изменить описание объекта: кость / Нет биоматериала"
+                        title="Изменить описание объекта: кость / Пустой конверт"
                       >
                         <input
                           type="checkbox"
                           checked={value === true}
                           disabled={!canEdit || controlRow || (blockedNoObjectRow && value !== true)}
-                          onChange={(event) => onToggleNoBiomaterial(row, event.target.checked)}
+                          onChange={(event) => onToggleEmptyEnvelope(row, event.target.checked)}
+                        />
+                      </label>
+                    ) : activeStage === 'preparation' && column.key === 'is_consumed' ? (
+                      <label className="no-object-checkbox" title="Объект полностью израсходован и недоступен для последующих этапов">
+                        <input
+                          type="checkbox"
+                          checked={value === true}
+                          disabled={!canEdit || controlRow || blockedNoObjectRow}
+                          onChange={(event) => onToggleConsumed(row, event.target.checked)}
                         />
                       </label>
                     ) : activeStage === 'registration' && column.key === registrationActiveColumnKey ? (
@@ -1064,12 +1101,14 @@ export function PartiesPage({
   onObjectOpen,
   onReportsOpen,
   initialPartyNo,
+  initialPartyYear,
   onInitialPartyHandled
 }: {
   user: User
   onObjectOpen: (id: number) => void
   onReportsOpen?: (tab?: string, params?: Record<string, string | number | boolean | null | undefined>) => void
   initialPartyNo?: string | null
+  initialPartyYear?: number | null
   onInitialPartyHandled?: () => void
 }) {
   const queryClient = useQueryClient()
@@ -1370,7 +1409,8 @@ export function PartiesPage({
   const toggleBurntBone = useMutation({
     mutationFn: ({ row, checked }: { row: StageTableRow; checked: boolean }) => {
       return api.updateObject(row.object.id, {
-        object_description: checked ? 'горелая кость' : 'кость'
+        object_description: checked ? 'горелая кость' : 'кость',
+        empty_envelope: false
       })
     },
     onSuccess: () => {
@@ -1382,10 +1422,11 @@ export function PartiesPage({
       queryClient.invalidateQueries({ queryKey: ['party-progress'] })
     }
   })
-  const toggleNoBiomaterial = useMutation({
+  const toggleEmptyEnvelope = useMutation({
     mutationFn: ({ row, checked }: { row: StageTableRow; checked: boolean }) => {
       return api.updateObject(row.object.id, {
-        object_description: checked ? 'Нет биоматериала' : 'кость'
+        object_description: checked ? 'Пустой конверт' : 'кость',
+        empty_envelope: checked
       })
     },
     onSuccess: () => {
@@ -1395,6 +1436,24 @@ export function PartiesPage({
       queryClient.invalidateQueries({ queryKey: ['parties'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       queryClient.invalidateQueries({ queryKey: ['party-progress'] })
+    }
+  })
+  const toggleConsumed = useMutation({
+    mutationFn: ({ row, checked }: { row: StageTableRow; checked: boolean }) => api.updateObject(row.object.id, { is_consumed: checked }),
+    onSuccess: () => {
+      setSelectedRows(new Set())
+      queryClient.invalidateQueries({ queryKey: ['party-stage-table'] })
+      queryClient.invalidateQueries({ queryKey: ['objects'] })
+      queryClient.invalidateQueries({ queryKey: ['party'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      queryClient.invalidateQueries({ queryKey: ['party-progress'] })
+    }
+  })
+  const toggleNovosib = useMutation({
+    mutationFn: ({ row, checked }: { row: StageTableRow; checked: boolean }) => api.updateObject(row.object.id, { novosib: checked }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['party-stage-table'] })
+      queryClient.invalidateQueries({ queryKey: ['objects'] })
     }
   })
   const saveDrafts = useMutation({
@@ -1767,7 +1826,13 @@ export function PartiesPage({
   useEffect(() => {
     if (!parties.data) return
     if (initialPartyNo) {
-      const target = parties.data.items.find((item) => item.party_no === initialPartyNo)
+      if (initialPartyYear != null && selectedYear !== initialPartyYear) {
+        setSelectedYear(initialPartyYear)
+        return
+      }
+      const target = parties.data.items.find(
+        (item) => item.party_no === initialPartyNo && (initialPartyYear == null || item.case_year === initialPartyYear)
+      )
       if (target) {
         setSelectedId(target.id)
         onInitialPartyHandled?.()
@@ -1785,7 +1850,7 @@ export function PartiesPage({
     if (selectedId && !parties.data.items.some((item) => item.id === selectedId)) {
       setSelectedId(parties.data.items[0]?.id ?? null)
     }
-  }, [initialPartyNo, onInitialPartyHandled, parties.data, selectedId, selectedYear])
+  }, [initialPartyNo, initialPartyYear, onInitialPartyHandled, parties.data, selectedId, selectedYear])
 
   useEffect(() => {
     setObjectQuery('')
@@ -2274,7 +2339,9 @@ export function PartiesPage({
               {controlToast && <div className="alert warning stage-toast">{controlToast}</div>}
               {(toggleNoObjectControl.error || toggleNoDecreeControl.error) && <div className="alert error">{(toggleNoObjectControl.error || toggleNoDecreeControl.error)?.message}</div>}
               {toggleBurntBone.error && <div className="alert error">{toggleBurntBone.error.message}</div>}
-              {toggleNoBiomaterial.error && <div className="alert error">{toggleNoBiomaterial.error.message}</div>}
+              {toggleEmptyEnvelope.error && <div className="alert error">{toggleEmptyEnvelope.error.message}</div>}
+              {toggleConsumed.error && <div className="alert error">{toggleConsumed.error.message}</div>}
+              {toggleNovosib.error && <div className="alert error">{toggleNovosib.error.message}</div>}
               {Object.keys(columnFilters).length > 0 && (
                 <div className="chips filter-chips">
                   {Object.entries(columnFilters).map(([key, values]) => {
@@ -2312,7 +2379,9 @@ export function PartiesPage({
                 onToggleNoObjectControl={handleToggleNoObjectControl}
                 onToggleNoDecreeControl={handleToggleNoDecreeControl}
                 onToggleBurntBone={(row, checked) => toggleBurntBone.mutate({ row, checked })}
-                onToggleNoBiomaterial={(row, checked) => toggleNoBiomaterial.mutate({ row, checked })}
+                onToggleEmptyEnvelope={(row, checked) => toggleEmptyEnvelope.mutate({ row, checked })}
+                onToggleConsumed={(row, checked) => toggleConsumed.mutate({ row, checked })}
+                onToggleNovosib={(row, checked) => toggleNovosib.mutate({ row, checked })}
                 registrationActiveIds={registrationActiveIds}
                 onToggleRegistrationActive={handleToggleRegistrationActive}
               />

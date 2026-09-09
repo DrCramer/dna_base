@@ -2367,6 +2367,14 @@ textarea { min-height: 96px; resize: vertical; }
   background: color-mix(in srgb, var(--accent-2) 14%, var(--panel));
 }
 
+.stage-grid-body-row.consumed-object-row > div {
+  background: color-mix(in srgb, #d5a236 9%, var(--panel));
+}
+
+.stage-grid-body-row.consumed-object-row:hover > div {
+  background: color-mix(in srgb, #d5a236 14%, var(--panel));
+}
+
 .stage-grid-body-row.repeat-object-row > div {
   background: color-mix(in srgb, var(--accent) 5%, var(--panel));
 }
@@ -3394,8 +3402,8 @@ textarea { min-height: 96px; resize: vertical; }
 
 .mass-object-row {
   display: grid;
-  grid-template-columns: 44px 150px 90px 96px 132px 120px minmax(160px, 1fr) 80px;
-  min-width: 900px;
+  grid-template-columns: 44px 150px 90px 96px 132px 120px 120px minmax(160px, 1fr) 80px;
+  min-width: 1020px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
 }

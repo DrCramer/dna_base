@@ -17,7 +17,7 @@ from app.schemas import (
     WorkSessionPreviewResponse,
 )
 from app.services.audit import write_audit
-from app.services.no_object import object_is_no_object, party_no_object_controls
+from app.services.no_object import object_is_consumed, object_is_no_object, party_no_object_controls
 from app.services.stages import create_stage_event
 
 
@@ -66,19 +66,22 @@ async def _selected_objects(session: AsyncSession, payload: WorkSessionPreviewRe
     return list(objects.values())
 
 
-async def _editable_stage_objects(session: AsyncSession, objects: list[RegistryObject], stage_type: str) -> tuple[list[RegistryObject], int]:
+async def _editable_stage_objects(session: AsyncSession, objects: list[RegistryObject], stage_type: str) -> tuple[list[RegistryObject], int, int]:
     if stage_type in ("registration", "all") or not objects:
-        return objects, 0
+        return objects, 0, 0
     party_ids = sorted({obj.party_id for obj in objects if obj.party_id})
     controls = await party_no_object_controls(session, party_ids)
     editable: list[RegistryObject] = []
     blocked = 0
+    consumed = 0
     for obj in objects:
         if object_is_no_object(obj, controls.get(obj.party_id or 0, set())):
             blocked += 1
+        elif stage_type != "sample_prep" and object_is_consumed(obj):
+            consumed += 1
         else:
             editable.append(obj)
-    return editable, blocked
+    return editable, blocked, consumed
 
 
 async def _existing_stage_counts(
@@ -105,7 +108,7 @@ async def preview_work_session(
     _user: User = Depends(edit_user),
 ):
     selected_objects = await _selected_objects(session, payload)
-    objects, blocked_count = await _editable_stage_objects(session, selected_objects, payload.stage_type)
+    objects, blocked_count, consumed_count = await _editable_stage_objects(session, selected_objects, payload.stage_type)
     existing_counts = await _existing_stage_counts(session, objects, payload.stage_type)
     next_attempts = [existing_counts.get(obj.id, 0) + 1 for obj in objects] or [1]
     response = WorkSessionPreviewResponse(
@@ -120,6 +123,8 @@ async def preview_work_session(
     )
     if blocked_count:
         response.warnings.append(f"Пропущено объектов с отметкой «Нет объекта»: {blocked_count}.")
+    if consumed_count:
+        response.warnings.append(f"Пропущено полностью израсходованных объектов: {consumed_count}.")
     return response
 
 
@@ -130,10 +135,12 @@ async def commit_work_session(
     user: User = Depends(edit_user),
 ):
     selected_objects = await _selected_objects(session, payload)
-    objects, blocked_count = await _editable_stage_objects(session, selected_objects, payload.stage_type)
+    objects, blocked_count, consumed_count = await _editable_stage_objects(session, selected_objects, payload.stage_type)
     if not objects:
         if blocked_count:
             raise HTTPException(status_code=400, detail="Все выбранные объекты помечены как «Нет объекта»")
+        if consumed_count:
+            raise HTTPException(status_code=400, detail="Все выбранные объекты полностью израсходованы")
         raise HTTPException(status_code=400, detail="Не выбраны объекты для сессии")
     party_id = payload.party_ids[0] if len(payload.party_ids) == 1 else None
     work_session = WorkSession(
@@ -145,7 +152,7 @@ async def commit_work_session(
         created_by_user_id=user.id,
         source=payload.source,
         status="applied",
-        raw_json={**payload.model_dump(mode="json"), "blocked_no_object_count": blocked_count},
+        raw_json={**payload.model_dump(mode="json"), "blocked_no_object_count": blocked_count, "blocked_consumed_count": consumed_count},
     )
     session.add(work_session)
     await session.flush()
@@ -183,7 +190,7 @@ async def commit_work_session(
         work_session.id,
         "commit",
         None,
-        {"object_count": len(objects), "stage_events_created": created, "stage_type": payload.stage_type, "blocked_no_object_count": blocked_count},
+        {"object_count": len(objects), "stage_events_created": created, "stage_type": payload.stage_type, "blocked_no_object_count": blocked_count, "blocked_consumed_count": consumed_count},
     )
     await session.commit()
     return WorkSessionCommitResponse(

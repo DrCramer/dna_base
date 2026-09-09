@@ -36,6 +36,9 @@ export interface RegistryObject {
   extracted_before: string | null
   not_extracted_before: string | null
   registry_filled_by: string | null
+  empty_envelope: boolean
+  is_consumed: boolean
+  novosib: boolean
   status: string | null
   raw_registry_json: Record<string, unknown>
   created_at: string

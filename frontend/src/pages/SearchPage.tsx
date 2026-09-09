@@ -42,7 +42,7 @@ export function SearchPage({
       <section className="section">
         <div className="searchbox"><Search size={18} /><input value={q} onChange={(event) => setQ(event.target.value)} placeholder="Номер, партия, исполнитель, метод, объект..." /></div>
         <div className="quick-filter-row">
-          {['Нет объекта', 'Нет постановления', 'Нет биоматериала', 'Горелая кость', 'Без анализа', 'Есть повторы', 'Проблемные партии'].map((item) => (
+          {['Нет объекта', 'Нет постановления', 'Пустой конверт', 'Горелая кость', 'Без анализа', 'Есть повторы', 'Проблемные партии'].map((item) => (
             <button className="icon-button" key={item} onClick={() => setQ(item)}>{item}</button>
           ))}
           <span className="muted-note">{isFetching || parties.isFetching ? 'Поиск...' : `${foundCount} найдено`}</span>

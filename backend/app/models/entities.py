@@ -165,6 +165,9 @@ class RegistryObject(Base, TimestampMixin):
     extracted_before: Mapped[str | None] = mapped_column(String(255))
     not_extracted_before: Mapped[str | None] = mapped_column(String(255))
     registry_filled_by: Mapped[str | None] = mapped_column(String(255))
+    empty_envelope: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    is_consumed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    novosib: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     status: Mapped[str] = mapped_column(String(80), default="new", index=True)
     raw_registry_json: Mapped[dict[str, Any]] = mapped_column(json_type, default=dict)
 

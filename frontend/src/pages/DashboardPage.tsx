@@ -59,7 +59,7 @@ export function DashboardPage({
   onPartyOpen,
   onReportsOpen
 }: {
-  onPartyOpen: (partyNo: string) => void
+  onPartyOpen: (partyNo: string, caseYear?: number | null) => void
   onReportsOpen?: (tab?: string) => void
 }) {
   const { data, isLoading } = useQuery({ queryKey: ['dashboard'], queryFn: api.dashboard })
@@ -130,15 +130,15 @@ export function DashboardPage({
                   role="row"
                   tabIndex={0}
                   key={party.id}
-                  onClick={() => onPartyOpen(party.party_no)}
+                  onClick={() => onPartyOpen(party.party_no, party.case_year)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
                       event.preventDefault()
-                      onPartyOpen(party.party_no)
+                      onPartyOpen(party.party_no, party.case_year)
                     }
                   }}
                 >
-                  <div role="cell"><button className="link-button" onClick={(event) => { event.stopPropagation(); onPartyOpen(party.party_no) }}>{party.party_no}</button></div>
+                  <div role="cell"><button className="link-button" onClick={(event) => { event.stopPropagation(); onPartyOpen(party.party_no, party.case_year) }}>{party.party_no}</button></div>
                   <div role="cell"><strong>{party.object_count}</strong></div>
                   {stageColumns.filter(([key]) => !['milling'].includes(key)).map(([key]) => {
                     const done = party.stage_counts[key] ?? 0
@@ -177,7 +177,7 @@ export function DashboardPage({
             </div>
             {partiesWithControl.map((party) => (
               <div className="dashboard-control-row" role="row" key={party.id}>
-                <div role="cell"><button className="link-button" onClick={() => onPartyOpen(party.party_no)}>{party.party_no}</button></div>
+                <div role="cell"><button className="link-button" onClick={() => onPartyOpen(party.party_no, party.case_year)}>{party.party_no}</button></div>
                 {controlColumns.map(([key]) => {
                   const display = controlValue(party[key])
                   const isCritical = key === 'control_need_recall' || key === 'control_recalled'

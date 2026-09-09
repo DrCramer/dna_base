@@ -132,6 +132,8 @@ async def convert_entries(
 ) -> tuple[list[dict[str, Any]], list[Path]]:
     by_id = {doc["id"]: doc for doc in documents}
     semaphore = asyncio.Semaphore(max(settings.convert_workers, 1))
+    document_locks = {doc_id: asyncio.Lock() for doc_id in by_id}
+    document_results: dict[str, tuple[Path, dict[str, Any], list[str]]] = {}
     ordered_paths: list[Path | None] = [None] * len(entries)
     completed = 0
     completed_lock = asyncio.Lock()
@@ -148,28 +150,36 @@ async def convert_entries(
         async with semaphore:
             doc = by_id[entry["doc_id"]]
             try:
-                input_path = job_dir / doc["path"]
-                cached_pdf = job_dir / "converted" / f"{input_path.stem}.pdf"
-                was_cached = cached_pdf.exists() and cached_pdf.stat().st_size > 0
-                pdf_path = await asyncio.to_thread(convert_docx_to_pdf, doc, job_dir, settings)
-                try:
-                    analysis = await asyncio.to_thread(analyze_pdf, pdf_path)
-                except PdfValidationError:
-                    if not was_cached:
-                        raise
-                    pdf_path.unlink(missing_ok=True)
-                    pdf_path = await asyncio.to_thread(convert_docx_to_pdf, doc, job_dir, settings)
-                    analysis = await asyncio.to_thread(analyze_pdf, pdf_path)
-                if analysis["page_count"] != 1 and settings.allow_drop_blank_extra_pages:
-                    visible_pages = [
-                        page["index"] for page in analysis["pages"] if page.get("visible")
-                    ]
-                    if len(visible_pages) == 1:
-                        await asyncio.to_thread(reduce_to_single_page, pdf_path, visible_pages[0])
-                        entry["warnings"].append(
-                            "LibreOffice создал лишнюю пустую страницу; она удалена без масштабирования."
-                        )
-                        analysis = await asyncio.to_thread(analyze_pdf, pdf_path)
+                async with document_locks[doc["id"]]:
+                    result = document_results.get(doc["id"])
+                    if result is None:
+                        input_path = job_dir / doc["path"]
+                        cached_pdf = job_dir / "converted" / f"{input_path.stem}.pdf"
+                        was_cached = cached_pdf.exists() and cached_pdf.stat().st_size > 0
+                        pdf_path = await asyncio.to_thread(convert_docx_to_pdf, doc, job_dir, settings)
+                        try:
+                            analysis = await asyncio.to_thread(analyze_pdf, pdf_path)
+                        except PdfValidationError:
+                            if not was_cached:
+                                raise
+                            pdf_path.unlink(missing_ok=True)
+                            pdf_path = await asyncio.to_thread(convert_docx_to_pdf, doc, job_dir, settings)
+                            analysis = await asyncio.to_thread(analyze_pdf, pdf_path)
+                        conversion_warnings: list[str] = []
+                        if analysis["page_count"] != 1 and settings.allow_drop_blank_extra_pages:
+                            visible_pages = [
+                                page["index"] for page in analysis["pages"] if page.get("visible")
+                            ]
+                            if len(visible_pages) == 1:
+                                await asyncio.to_thread(reduce_to_single_page, pdf_path, visible_pages[0])
+                                conversion_warnings.append(
+                                    "LibreOffice создал лишнюю пустую страницу; она удалена без масштабирования."
+                                )
+                                analysis = await asyncio.to_thread(analyze_pdf, pdf_path)
+                        result = (pdf_path, analysis, conversion_warnings)
+                        document_results[doc["id"]] = result
+                pdf_path, analysis, conversion_warnings = result
+                entry["warnings"].extend(conversion_warnings)
                 ensure_single_non_empty_page(analysis, doc["original_name"])
                 page = analysis["pages"][0]
                 entry["conversion_status"] = "Готов"
