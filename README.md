@@ -120,6 +120,13 @@ docker compose up -d --build
 docker compose ps
 ```
 
+После первого исправного обновления можно пользоваться готовой командой:
+
+```bash
+cd ~/dna_base
+./scripts/update_server.sh
+```
+
 Если Docker на сервере доступен только через `sudo`, используйте
 `sudo docker compose` во всех командах выше.
 
@@ -157,6 +164,47 @@ docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB
 Если `git status --short` показывает изменённые файлы проекта, сначала разберитесь
 с этими изменениями. Не используйте `git reset --hard`, чтобы случайно не потерять
 локальные правки.
+
+### Ошибка `detected dubious ownership` или `FETCH_HEAD: Permission denied`
+
+Она означает, что репозиторий был скопирован или распакован через `sudo` и принадлежит
+пользователю `root`. Один раз верните каталог текущему пользователю:
+
+```bash
+cd /home/dna
+sudo chown -R "$USER:$(id -gn)" /home/dna/dna_base
+cd /home/dna/dna_base
+git status --short
+```
+
+После этого запускайте `git status`, `git pull` и скрипт обновления **без `sudo`**.
+`sudo` может использовать другой Git-конфиг, SSH-ключи и настройки сети.
+
+Если перед обновлением отображаются локальные изменения, безопасно отложите их:
+
+```bash
+git stash push -m "server-local-before-update"
+git pull --ff-only origin main
+```
+
+Рабочий `.env` не отслеживается Git и в stash не попадёт. Старые изменения
+`docker-compose.yml` обычно не нужно возвращать: настройки сервера следует хранить
+в `.env`. Посмотреть сохранённую разницу можно командой `git stash show -p`.
+
+### Ошибка GitHub `511`
+
+Сначала убедитесь, что `git pull` выполняется обычным пользователем, а не через
+`sudo`. Затем проверьте доступ сервера к GitHub:
+
+```bash
+curl -I https://github.com
+git ls-remote https://github.com/DrCramer/dna_base.git HEAD
+git config --global --get-regexp 'http\..*proxy|https\..*proxy' || true
+```
+
+Если и `curl` возвращает `511`, запрос блокирует прокси, шлюз или авторизация сети
+сервера. Это не ошибка репозитория: сначала нужно восстановить HTTPS-доступ к
+`github.com`. Не запускайте `sudo git pull` в качестве обходного решения.
 
 ## Production admin
 
