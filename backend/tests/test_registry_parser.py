@@ -8,7 +8,7 @@ from openpyxl import load_workbook
 from app.parsers.normalization import parse_date
 from app.parsers.normalization import extract_party_no
 from app.parsers.registration_list import parse_registration_list
-from app.parsers.registry import REGISTRY_HEADERS, _extract_stage_events, _header_indexes, parse_registry
+from app.parsers.registry import REGISTRY_HEADERS, _extract_object, _extract_stage_events, _header_indexes, parse_registry
 from app.services.export import build_registry_workbook
 from app.services.stages import _merge_sample_prep_specs, registry_event_specs
 
@@ -247,6 +247,31 @@ def test_registry_parser_accepts_short_registry_filled_by_header():
     indexes = _header_indexes(["№ постановления", "№ рег РЦСМЭ", "Заполнение реестра"])
 
     assert indexes["registry_filled_by"] == 2
+
+
+def test_registry_maps_extraction_note_to_sample_prep_comment():
+    headers = list(REGISTRY_HEADERS)
+    row = [None] * len(headers)
+    row[headers.index("№ постановления")] = "100-2026"
+    row[headers.index("№ рег РЦСМЭ")] = "100-1"
+    row[headers.index("Выделяем")] = "Костная ткань"
+
+    extracted = _extract_object(2, row, headers, _header_indexes(headers))
+    sample_prep_specs = [
+        spec
+        for event in extracted["stage_events"]
+        for spec in registry_event_specs(event)
+        if spec["stage_type"] == "sample_prep"
+    ]
+    merged = _merge_sample_prep_specs(
+        sample_prep_specs,
+        registry_filled_by=extracted["registry_filled_by"],
+        sample_prep_comment=extracted["extraction_note"],
+    )
+
+    assert extracted["extraction_note"] == "Костная ткань"
+    assert merged
+    assert merged["comment"] == "Костная ткань"
 
 
 def test_registry_analysis_preserves_genotype_and_performer_without_date():

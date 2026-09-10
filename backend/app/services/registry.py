@@ -718,7 +718,7 @@ async def repair_registry_stage_events(
             deleted = await delete_registry_stage_events(session, obj.id, set(), REPAIR_STAGE_TYPES)
             row_events = _repair_row_stage_events(row)
             written = 0
-            if row_events or row.get("registry_filled_by"):
+            if row_events or row.get("registry_filled_by") or row.get("extraction_note"):
                 repair_row = {**row, "stage_events": row_events}
                 written = await write_registry_stage_events(session, obj, repair_row, batch, batch.file_sha256, user)
             stats["objects_matched"] += 1

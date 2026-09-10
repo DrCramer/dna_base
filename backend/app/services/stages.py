@@ -392,9 +392,14 @@ def _merge_comments(*values: str | None) -> str | None:
     return "; ".join(items) if items else None
 
 
-def _merge_sample_prep_specs(items: list[dict[str, Any]], registry_filled_by: Any = None) -> dict[str, Any] | None:
+def _merge_sample_prep_specs(
+    items: list[dict[str, Any]],
+    registry_filled_by: Any = None,
+    sample_prep_comment: Any = None,
+) -> dict[str, Any] | None:
     row_registry_filled_by = clean_text(registry_filled_by)
-    if not items and not row_registry_filled_by:
+    row_comment = clean_text(sample_prep_comment)
+    if not items and not row_registry_filled_by and not row_comment:
         return None
     details = [item.get("detail_data") or {} for item in items]
     performers = []
@@ -405,7 +410,7 @@ def _merge_sample_prep_specs(items: list[dict[str, Any]], registry_filled_by: An
     return {
         "stage_type": "sample_prep",
         "event_date": _latest_date(*(item.get("event_date") for item in items)),
-        "comment": _merge_comments(*(item.get("comment") for item in items)),
+        "comment": _merge_comments(row_comment, *(item.get("comment") for item in items)),
         "attempt_no": None,
         "detail_data": {
             "registry_filled_by": filled_by,
@@ -611,14 +616,18 @@ async def write_registry_stage_events(
                 deferred_specs.append((event, spec))
 
     stage_types = {spec["stage_type"] for spec in sample_prep_specs}
-    if clean_text(row.get("registry_filled_by")):
+    if clean_text(row.get("registry_filled_by")) or clean_text(row.get("extraction_note")):
         stage_types.add("sample_prep")
     stage_types.update(spec["stage_type"] for _, spec in deferred_specs)
     deleted = await delete_registry_stage_events(session, obj.id, blocks, stage_types)
     if deleted:
         await session.flush()
 
-    merged_sample_prep = _merge_sample_prep_specs(sample_prep_specs, row.get("registry_filled_by"))
+    merged_sample_prep = _merge_sample_prep_specs(
+        sample_prep_specs,
+        registry_filled_by=row.get("registry_filled_by"),
+        sample_prep_comment=row.get("extraction_note"),
+    )
     if merged_sample_prep:
         source_raw = {}
         for event in events:
@@ -627,6 +636,7 @@ async def write_registry_stage_events(
         raw_json = _registry_common_raw(source_raw, {"block": "sample_prep", "table": "object_prep_events"}, row, batch, file_sha256)
         raw_json["canonical_stage_type"] = "sample_prep"
         raw_json["source_blocks"] = sorted(blocks)
+        raw_json["extraction_note"] = row.get("extraction_note")
         await create_stage_event(
             session,
             obj,
