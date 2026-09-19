@@ -5,9 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Порядок печати DOCX</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/print/static/styles.css?v=20260809-registration-preview-v2" />
+    <link rel="stylesheet" href="/print/static/styles.css?v=20260919-pdf-enhancements" />
   </head>
-  <body class="{% if embedded %}embedded{% endif %}" data-can-edit="{% if can_edit %}1{% else %}0{% endif %}">
+  <body
+    class="{% if embedded %}embedded{% endif %}"
+    data-can-edit="{% if can_edit %}1{% else %}0{% endif %}"
+    data-max-files="{{ max_files }}"
+    data-max-upload-mb="{{ max_upload_mb }}"
+    data-max-single-file-mb="{{ max_single_file_mb }}"
+  >
     <header class="app-header">
       <div class="header-inner">
         <div class="brand">
@@ -60,14 +66,31 @@
           <div class="hero-copy">
             <p class="eyebrow">Шаг 1 из 4</p>
             <h2 id="documentsTitle">Подготовим документы к печати</h2>
-            <p>Загрузите DOCX или ZIP, затем укажите нужный порядок.</p>
+            <p>Соберите документы из файлов, ZIP и нескольких папок, затем загрузите их одной задачей.</p>
           </div>
           <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="Загрузить документы">
             <input id="fileInput" type="file" multiple accept=".docx,.zip,.xlsx" />
-            <strong>Перетащите документы сюда</strong>
-            <span>DOCX, ZIP или XLSX</span>
-            <button id="selectFilesButton" type="button">Выбрать файлы</button>
-            <small>До 2000 DOCX за одну задачу</small>
+            <input id="folderInput" type="file" webkitdirectory directory multiple />
+            <strong>Перетащите DOCX, ZIP или папки сюда</strong>
+            <span>Выборы накапливаются до загрузки</span>
+            <div class="inline-actions">
+              <button id="selectFilesButton" type="button">Добавить файлы</button>
+              <button id="selectFolderButton" class="secondary" type="button">Добавить папку</button>
+            </div>
+            <small>До {{ max_files }} DOCX · не более {{ max_upload_mb }} МБ</small>
+          </div>
+        </div>
+
+        <div id="pendingQueue" class="source-queue" hidden>
+          <div class="source-queue-copy">
+            <span class="status-pill info">Подготовлено к загрузке</span>
+            <strong id="pendingQueueTitle">0 документов</strong>
+            <p id="pendingQueueSummary"></p>
+            <small id="pendingQueueHint"></small>
+          </div>
+          <div class="inline-actions">
+            <button id="clearQueueButton" class="secondary" type="button">Очистить</button>
+            <button id="uploadQueueButton" type="button">Загрузить документы</button>
           </div>
         </div>
 
@@ -122,14 +145,24 @@
             </div>
             <div class="inline-actions">
               <label class="file-button secondary">
-                <input id="txtInput" type="file" accept=".txt,text/plain" />
+                <input id="txtInput" type="file" multiple accept=".txt,text/plain" />
                 Загрузить TXT
               </label>
+              <button id="sortSequenceButton" class="secondary" type="button">Сортировать ↑</button>
+              <button id="undoSortButton" class="secondary" type="button" hidden>Отменить сортировку</button>
               <button id="clearSequenceButton" class="secondary" type="button">Очистить</button>
             </div>
           </div>
+          <div id="txtFilesSummary" class="file-summary" hidden></div>
           <label class="field-label" for="sequenceInput">Список номеров</label>
           <textarea id="sequenceInput" rows="12" spellcheck="false" placeholder="ее5968&#10;ее6032&#10;нн2832"></textarea>
+          <div id="orderValidationNotice" class="order-validation-notice" hidden>
+            <div>
+              <strong id="orderValidationTitle">Порядок проверен</strong>
+              <p id="orderValidationText"></p>
+            </div>
+            <button id="viewOrderValidationButton" class="secondary" type="button">Посмотреть проверку</button>
+          </div>
           <div class="input-footer">
             <span id="sequenceCount">0 номеров</span>
             <button id="validateButton" type="button" disabled>Проверить порядок</button>
@@ -290,7 +323,7 @@
             <div class="input-footer">
               <span id="stampSummary">Документов: 0 · Меток: 0</span>
               <div id="stampValidationActions" class="inline-actions">
-                <button id="applyStampingButton" class="secondary" type="button" disabled>Применить метки</button>
+                <button id="applyStampingButton" class="secondary" type="button" disabled>Проверить метки</button>
                 <button id="stampPreviewButton" class="secondary" type="button" disabled>Показать пример</button>
               </div>
             </div>
@@ -370,6 +403,7 @@
         <p id="confirmText"></p>
         <div class="modal-actions">
           <button id="confirmCancelButton" class="secondary" value="cancel" type="submit">Отмена</button>
+          <button id="confirmAltButton" class="secondary" value="alt" type="submit" hidden>Заменить</button>
           <button id="confirmOkButton" value="ok" type="submit">Продолжить</button>
         </div>
       </form>
@@ -395,6 +429,6 @@
       </form>
     </dialog>
 
-    <script src="/print/static/app.js?v=20260809-registration-preview-v2"></script>
+    <script src="/print/static/app.js?v=20260919-pdf-enhancements"></script>
   </body>
 </html>

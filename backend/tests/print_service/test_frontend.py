@@ -34,7 +34,11 @@ def test_homepage_uses_redesigned_step_flow(tmp_path, monkeypatch):
     assert "data-step=\"order\"" in html
     assert "data-step=\"check\"" in html
     assert "data-step=\"result\"" in html
-    assert "Выбрать файлы" in html
+    assert "Добавить файлы" in html
+    assert "Добавить папку" in html
+    assert "webkitdirectory" in html
+    assert 'id="txtInput" type="file" multiple' in html
+    assert "Сортировать ↑" in html
     assert "Выбрать DOCX или ZIP" not in html
     assert "Предварительный просмотр" not in html
 
@@ -82,7 +86,7 @@ def test_registration_mode_auto_uses_uploaded_excel_as_external_list():
     assert '["0 номеров"]' in text
     assert "state.registrationExternalLoadedFileKey = null;" in text
     assert "if (state.registrationExternalLoadedFileKey === key) return;" not in text
-    assert 'uniqueFiles([...documentFiles, ...excelFiles.slice(0, 1)])' in text
+    assert 'formData.append("files", file, queuedRelativePath(record) || file.name)' in text
     assert "job.registration_external_numbers?.length" in text
 
 
@@ -93,3 +97,36 @@ def test_registration_preview_uses_one_expandable_table_and_party_pdf_count():
     assert 'registration-preview-table compact' not in text
     assert 'validation.registration?.party_count || 0' in text
     assert '["excel", "registration"].includes(validation.mode)' in text
+
+
+def test_frontend_accumulates_folders_and_filters_folder_contents():
+    text = APP_JS.read_text(encoding="utf-8")
+
+    assert "state.pendingFiles.push(normalized)" in text
+    assert 'name.endsWith(".docx")' in text
+    assert 'file.name.startsWith("~$")' in text
+    assert "droppedEntryRecords" in text
+    assert "readDirectoryBatch" in text
+    assert "pendingQueueLimitError" in text
+
+
+def test_frontend_merges_multiple_txt_and_has_natural_sort():
+    text = APP_JS.read_text(encoding="utf-8")
+
+    assert 'contents.map(normalizeTxtBoundary).join("\\n")' in text
+    assert "askListMergeChoice" in text
+    assert "naturalSortParts" in text
+    assert "compareNaturalValues" in text
+    assert "SORT_CONFUSABLES" in text
+    assert "state.sequenceBeforeSort" in text
+
+
+def test_text_validation_waits_for_stamp_validation_when_enabled():
+    text = APP_JS.read_text(encoding="utf-8")
+    validate_function = text.split("async function validateTextJob()", 1)[1].split("async function validateExcelJob()", 1)[0]
+
+    assert "collectTextValidationStampingConfig()" in validate_function
+    assert "if (stampingEnabled)" in validate_function
+    assert 'setStep("order")' in validate_function
+    assert 'setStep("check")' in validate_function
+    assert "if (data.can_build)" in text.split("async function applyStampingToCurrentValidation", 1)[1]

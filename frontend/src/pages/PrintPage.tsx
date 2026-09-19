@@ -61,7 +61,7 @@ export function PrintPage() {
               <RefreshCw size={18} />
               Обновить
             </button>
-            <a className="primary download" href="/print?embedded=1&v=20260809-registration-preview-v2" target="_blank" rel="noreferrer">
+            <a className="primary download" href="/print?embedded=1&v=20260919-pdf-enhancements" target="_blank" rel="noreferrer">
               <ExternalLink size={18} />
               Открыть отдельно
             </a>

@@ -47,6 +47,12 @@ const state = {
   stampPreviewUrl: null,
   registrationExternalLoadedFileKey: null,
   registrationExpandedPartyNo: null,
+  pendingFiles: [],
+  pendingSkipped: 0,
+  pendingFolderNames: new Set(),
+  txtFiles: [],
+  sequenceBeforeSort: null,
+  sequenceInternalUpdate: false,
 };
 
 const els = {
@@ -68,7 +74,15 @@ const els = {
   resultScreen: document.querySelector("#resultScreen"),
   dropZone: document.querySelector("#dropZone"),
   fileInput: document.querySelector("#fileInput"),
+  folderInput: document.querySelector("#folderInput"),
   selectFilesButton: document.querySelector("#selectFilesButton"),
+  selectFolderButton: document.querySelector("#selectFolderButton"),
+  pendingQueue: document.querySelector("#pendingQueue"),
+  pendingQueueTitle: document.querySelector("#pendingQueueTitle"),
+  pendingQueueSummary: document.querySelector("#pendingQueueSummary"),
+  pendingQueueHint: document.querySelector("#pendingQueueHint"),
+  clearQueueButton: document.querySelector("#clearQueueButton"),
+  uploadQueueButton: document.querySelector("#uploadQueueButton"),
   uploadSummary: document.querySelector("#uploadSummary"),
   uploadStatus: document.querySelector("#uploadStatus"),
   acceptedCount: document.querySelector("#acceptedCount"),
@@ -105,10 +119,17 @@ const els = {
   applyRegistrationButton: document.querySelector("#applyRegistrationButton"),
   registrationPreview: document.querySelector("#registrationPreview"),
   txtInput: document.querySelector("#txtInput"),
+  txtFilesSummary: document.querySelector("#txtFilesSummary"),
   sequenceInput: document.querySelector("#sequenceInput"),
   sequenceCount: document.querySelector("#sequenceCount"),
+  sortSequenceButton: document.querySelector("#sortSequenceButton"),
+  undoSortButton: document.querySelector("#undoSortButton"),
   clearSequenceButton: document.querySelector("#clearSequenceButton"),
   validateButton: document.querySelector("#validateButton"),
+  orderValidationNotice: document.querySelector("#orderValidationNotice"),
+  orderValidationTitle: document.querySelector("#orderValidationTitle"),
+  orderValidationText: document.querySelector("#orderValidationText"),
+  viewOrderValidationButton: document.querySelector("#viewOrderValidationButton"),
   xlsxInput: document.querySelector("#xlsxInput"),
   validateExcelButton: document.querySelector("#validateExcelButton"),
   excelFileState: document.querySelector("#excelFileState"),
@@ -173,6 +194,7 @@ const els = {
   confirmTitle: document.querySelector("#confirmTitle"),
   confirmText: document.querySelector("#confirmText"),
   confirmOkButton: document.querySelector("#confirmOkButton"),
+  confirmAltButton: document.querySelector("#confirmAltButton"),
   confirmCancelButton: document.querySelector("#confirmCancelButton"),
   detailsDialog: document.querySelector("#detailsDialog"),
   taskDetails: document.querySelector("#taskDetails"),
@@ -203,10 +225,18 @@ function forgetLocalTask() {
   state.registrationPreview = null;
   state.registrationExternalLoadedFileKey = null;
   state.registrationExpandedPartyNo = null;
+  state.pendingFiles = [];
+  state.pendingSkipped = 0;
+  state.pendingFolderNames.clear();
+  state.txtFiles = [];
+  state.sequenceBeforeSort = null;
   state.activeFilter = "all";
   state.resultLimit = 160;
   state.expandedGroups.clear();
   state.stampingHydratedForJob = null;
+  els.stampEnabledInput.checked = false;
+  els.stampTextInput.value = "";
+  els.orderValidationNotice.hidden = true;
   els.sequenceInput.value = "";
   els.registrationExternalInput.value = "";
   els.registrationExternalWarnings.innerHTML = "";
@@ -214,6 +244,8 @@ function forgetLocalTask() {
   localStorage.removeItem(STORAGE.mode);
   localStorage.removeItem(STORAGE.sequence);
   stopPolling();
+  renderPendingQueue();
+  renderTxtFilesSummary();
 }
 
 function setStep(step) {
@@ -309,18 +341,137 @@ async function readJson(response) {
   return text ? JSON.parse(text) : {};
 }
 
-function uploadCounts(files) {
-  const incoming = [...files];
+function queuedFile(record) {
+  return record?.file || record;
+}
+
+function queuedRelativePath(record) {
+  const file = queuedFile(record);
+  return String(record?.relativePath || file?.webkitRelativePath || file?.name || "")
+    .replaceAll("\\", "/")
+    .replace(/^\/+/, "");
+}
+
+function uploadCounts(records) {
+  const incoming = [...records];
   return {
-    excelFiles: incoming.filter((file) => file.name.toLowerCase().endsWith(".xlsx")),
-    documentFiles: incoming.filter((file) => !file.name.toLowerCase().endsWith(".xlsx")),
+    excelFiles: incoming.filter((record) => queuedFile(record).name.toLowerCase().endsWith(".xlsx")),
+    documentFiles: incoming.filter((record) => !queuedFile(record).name.toLowerCase().endsWith(".xlsx")),
   };
 }
 
-async function uploadFiles(files) {
-  const { excelFiles, documentFiles } = uploadCounts(files);
+function queuedFileKey(record) {
+  const file = queuedFile(record);
+  const path = queuedRelativePath(record) || file.name;
+  return `${path}:${file.size}:${file.lastModified}`;
+}
+
+function queueRecords(records, { folderSelection = false } = {}) {
+  const existing = new Set(state.pendingFiles.map(queuedFileKey));
+  let added = 0;
+  let skipped = 0;
+  records.forEach((record) => {
+    const file = queuedFile(record);
+    const relativePath = queuedRelativePath(record);
+    const name = file.name.toLowerCase();
+    const temporary = file.name.startsWith("~$");
+    const fromFolder = folderSelection || record?.source === "folder" || relativePath.includes("/");
+    const supported = fromFolder ? name.endsWith(".docx") : /\.(docx|zip|xlsx)$/.test(name);
+    if (temporary) return;
+    if (!supported) {
+      skipped += 1;
+      return;
+    }
+    const normalized = { file, relativePath, source: fromFolder ? "folder" : "file" };
+    const key = queuedFileKey(normalized);
+    if (existing.has(key)) return;
+    existing.add(key);
+    state.pendingFiles.push(normalized);
+    added += 1;
+    if (normalized.source === "folder" && relativePath.includes("/")) {
+      state.pendingFolderNames.add(relativePath.split("/")[0]);
+    }
+  });
+  state.pendingSkipped += skipped;
+  const excelRecord = state.pendingFiles.find((record) => queuedFile(record).name.toLowerCase().endsWith(".xlsx"));
+  state.excelFile = excelRecord ? queuedFile(excelRecord) : state.excelFile;
+  renderPendingQueue();
+  renderModePanels();
+  if (added || skipped) {
+    const parts = [`Добавлено: ${added}`];
+    if (skipped) parts.push(`пропущено: ${skipped}`);
+    showToast(parts.join(" · "));
+  }
+}
+
+function readDirectoryBatch(reader) {
+  return new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+}
+
+async function droppedEntryRecords(entry) {
+  if (entry.isFile) {
+    const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+    return [{ file, relativePath: String(entry.fullPath || file.name).replace(/^\/+/, ""), source: "file" }];
+  }
+  if (!entry.isDirectory) return [];
+  const reader = entry.createReader();
+  const children = [];
+  while (true) {
+    const batch = await readDirectoryBatch(reader);
+    if (!batch.length) break;
+    children.push(...batch);
+  }
+  const nested = await Promise.all(children.map((child) => droppedEntryRecords(child)));
+  return nested.flat().map((record) => ({ ...record, source: "folder" }));
+}
+
+async function droppedRecords(dataTransfer) {
+  const entries = [...(dataTransfer.items || [])]
+    .map((item) => item.webkitGetAsEntry?.())
+    .filter(Boolean);
+  if (!entries.length) return [...dataTransfer.files].map((file) => ({ file, relativePath: file.name, source: "file" }));
+  const groups = await Promise.all(entries.map((entry) => droppedEntryRecords(entry)));
+  return groups.flat();
+}
+
+function renderPendingQueue() {
+  const records = state.pendingFiles;
+  els.pendingQueue.hidden = records.length === 0;
+  if (!records.length) return;
+  const docx = records.filter((record) => queuedFile(record).name.toLowerCase().endsWith(".docx")).length;
+  const zip = records.filter((record) => queuedFile(record).name.toLowerCase().endsWith(".zip")).length;
+  const xlsx = records.filter((record) => queuedFile(record).name.toLowerCase().endsWith(".xlsx")).length;
+  const bytes = records.reduce((sum, record) => sum + queuedFile(record).size, 0);
+  const folderCount = state.pendingFolderNames.size;
+  const individualCount = records.filter((record) => record.source === "file").length;
+  els.pendingQueueTitle.textContent = `${docx} DOCX · ${zip} ZIP · ${formatBytes(bytes)}`;
+  els.pendingQueueSummary.textContent = `Источники: ${folderCount} ${plural(folderCount, "папка", "папки", "папок")} + ${individualCount} ${plural(individualCount, "отдельный файл", "отдельных файла", "отдельных файлов")}${xlsx ? ` · XLSX: ${xlsx}` : ""}`;
+  els.pendingQueueHint.textContent = state.pendingSkipped
+    ? `${state.pendingSkipped} ${plural(state.pendingSkipped, "неподдерживаемый файл пропущен", "неподдерживаемых файла пропущено", "неподдерживаемых файлов пропущено")}`
+    : "Можно добавить ещё файлы или папки перед загрузкой.";
+  const error = pendingQueueLimitError();
+  els.uploadQueueButton.disabled = Boolean(error) || docx + zip === 0;
+  els.uploadQueueButton.textContent = `Загрузить ${docx + zip} ${plural(docx + zip, "источник", "источника", "источников")}`;
+  if (error) els.pendingQueueHint.textContent = error;
+}
+
+function pendingQueueLimitError() {
+  const maxFiles = Number(document.body.dataset.maxFiles || 2000);
+  const maxUploadBytes = Number(document.body.dataset.maxUploadMb || 500) * 1024 * 1024;
+  const maxSingleBytes = Number(document.body.dataset.maxSingleFileMb || 50) * 1024 * 1024;
+  const docxCount = state.pendingFiles.filter((record) => queuedFile(record).name.toLowerCase().endsWith(".docx")).length;
+  if (docxCount > maxFiles) return `Слишком много DOCX: ${docxCount}. Лимит: ${maxFiles}.`;
+  const oversized = state.pendingFiles.find((record) => queuedFile(record).size > maxSingleBytes);
+  if (oversized) return `Файл ${queuedFile(oversized).name} превышает лимит ${document.body.dataset.maxSingleFileMb || 50} МБ.`;
+  const total = state.pendingFiles.reduce((sum, record) => sum + queuedFile(record).size, 0);
+  if (total > maxUploadBytes) return `Общий размер ${formatBytes(total)} превышает лимит ${document.body.dataset.maxUploadMb || 500} МБ.`;
+  return "";
+}
+
+async function uploadFiles(records) {
+  const { excelFiles, documentFiles } = uploadCounts(records);
   if (excelFiles.length) {
-    state.excelFile = excelFiles[0];
+    state.excelFile = queuedFile(excelFiles[0]);
     renderModePanels();
     if (state.mode === "registration" && state.jobId) {
       await loadSelectedExcelAsRegistrationExternalNumbers();
@@ -338,7 +489,10 @@ async function uploadFiles(files) {
 
   setStatus("Загружаем…", "info");
   const formData = new FormData();
-  uniqueFiles([...documentFiles, ...excelFiles.slice(0, 1)]).forEach((file) => formData.append("files", file));
+  [...documentFiles, ...excelFiles.slice(0, 1)].forEach((record) => {
+    const file = queuedFile(record);
+    formData.append("files", file, queuedRelativePath(record) || file.name);
+  });
   try {
     const response = await fetch("/api/print/jobs", { method: "POST", body: formData });
     const data = await readJson(response);
@@ -357,6 +511,10 @@ async function uploadFiles(files) {
       applyRegistrationExternalNumbersFromExcel(state.excelFile, data.registration_external_excel);
       state.registrationExternalLoadedFileKey = fileKey(state.excelFile);
     }
+    state.pendingFiles = [];
+    state.pendingSkipped = 0;
+    state.pendingFolderNames.clear();
+    renderPendingQueue();
     renderUploadSummary(state.lastJob);
     showToast(`Загружено ${data.accepted_documents} ${plural(data.accepted_documents, "DOCX", "DOCX", "DOCX")}`);
     setStep("order");
@@ -370,16 +528,6 @@ async function uploadFiles(files) {
     renderModePanels();
     updateHeader();
   }
-}
-
-function uniqueFiles(files) {
-  const seen = new Set();
-  return files.filter((file) => {
-    const key = `${file.name}:${file.size}:${file.lastModified}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
 }
 
 function fileKey(file) {
@@ -784,6 +932,127 @@ function labelLines(text) {
     .filter(Boolean);
 }
 
+function normalizeTxtBoundary(text) {
+  return String(text || "").replace(/\r\n?/g, "\n").replace(/\n+$/g, "");
+}
+
+function joinTxtContents(contents) {
+  return contents.map(normalizeTxtBoundary).join("\n");
+}
+
+function renderTxtFilesSummary() {
+  els.txtFilesSummary.hidden = state.txtFiles.length === 0;
+  if (!state.txtFiles.length) {
+    els.txtFilesSummary.innerHTML = "";
+    return;
+  }
+  const total = state.txtFiles.reduce((sum, item) => sum + item.count, 0);
+  const visible = state.txtFiles.slice(0, 5);
+  els.txtFilesSummary.innerHTML = `
+    <strong>Загружено списков: ${state.txtFiles.length} · номеров: ${total}</strong>
+    <div class="file-summary-list">
+      ${visible.map((item) => `<span><span title="${escapeAttr(item.name)}">${escapeHtml(item.name)}</span><b>${item.count}</b></span>`).join("")}
+      ${state.txtFiles.length > visible.length ? `<small>+ ещё ${state.txtFiles.length - visible.length} файлов</small>` : ""}
+    </div>
+  `;
+}
+
+async function loadSequenceTxtFiles(files) {
+  const selected = [...files];
+  if (!selected.length) return;
+  const loaded = await Promise.all(selected.map(async (file) => {
+    const text = await file.text();
+    return { name: file.name, text, count: labelLines(text).length };
+  }));
+  const combined = joinTxtContents(loaded.map((item) => item.text));
+  let choice = "replace";
+  if (els.sequenceInput.value.trim()) {
+    choice = await askListMergeChoice();
+    if (choice === "cancel") return;
+  }
+  invalidateTextValidation();
+  if (choice === "append") {
+    els.sequenceInput.value = joinTxtContents([els.sequenceInput.value, combined]);
+    state.txtFiles.push(...loaded);
+  } else {
+    els.sequenceInput.value = combined;
+    state.txtFiles = loaded;
+  }
+  state.sequenceBeforeSort = null;
+  els.undoSortButton.hidden = true;
+  updateSequenceCount();
+  renderTxtFilesSummary();
+  showToast(`Загружено списков: ${loaded.length} · номеров: ${loaded.reduce((sum, item) => sum + item.count, 0)}`);
+}
+
+const SORT_CONFUSABLES = {
+  "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "х": "x",
+  "у": "y", "к": "k", "м": "m", "т": "t", "н": "h", "в": "b",
+};
+
+function naturalSortParts(value) {
+  const normalized = String(value)
+    .normalize("NFC")
+    .toLocaleLowerCase("ru")
+    .replace(/[аеорсхукмтнв]/g, (char) => SORT_CONFUSABLES[char] || char);
+  return (normalized.match(/\d+|\D+/g) || []).map((part) => (/^\d+$/.test(part)
+    ? { number: true, value: part.replace(/^0+(?=\d)/, "") }
+    : { number: false, value: part }));
+}
+
+function compareNaturalValues(left, right) {
+  const a = naturalSortParts(left);
+  const b = naturalSortParts(right);
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    if (!a[index]) return -1;
+    if (!b[index]) return 1;
+    if (a[index].number && b[index].number) {
+      if (a[index].value.length !== b[index].value.length) return a[index].value.length - b[index].value.length;
+      const result = a[index].value.localeCompare(b[index].value);
+      if (result) return result;
+      continue;
+    }
+    if (a[index].number !== b[index].number) return a[index].number ? -1 : 1;
+    const result = a[index].value.localeCompare(b[index].value, "ru", { sensitivity: "base" });
+    if (result) return result;
+  }
+  return 0;
+}
+
+function sortSequenceNaturally() {
+  const rows = labelLines(els.sequenceInput.value);
+  if (!rows.length) {
+    showToast("Список номеров пуст");
+    return;
+  }
+  const sorted = rows
+    .map((value, index) => ({ value, index }))
+    .sort((left, right) => compareNaturalValues(left.value, right.value) || left.index - right.index)
+    .map((item) => item.value);
+  const nextValue = sorted.join("\n");
+  const alreadySorted = nextValue === els.sequenceInput.value.trim();
+  if (alreadySorted) {
+    showToast("Список уже отсортирован");
+    return;
+  }
+  invalidateTextValidation();
+  state.sequenceBeforeSort = els.sequenceInput.value;
+  els.sequenceInput.value = nextValue;
+  els.undoSortButton.hidden = false;
+  updateSequenceCount();
+  showToast(`${sorted.length} ${plural(sorted.length, "номер отсортирован", "номера отсортированы", "номеров отсортированы")} по возрастанию`);
+}
+
+function undoSequenceSort() {
+  if (state.sequenceBeforeSort === null) return;
+  invalidateTextValidation();
+  els.sequenceInput.value = state.sequenceBeforeSort;
+  state.sequenceBeforeSort = null;
+  els.undoSortButton.hidden = true;
+  updateSequenceCount();
+  showToast("Исходный порядок восстановлен");
+}
+
 function collectStampingConfig() {
   const groups = {};
   els.stampExcelGroups.querySelectorAll("[data-stamp-group-text]").forEach((node) => {
@@ -816,6 +1085,11 @@ function collectExcelValidationStampingConfig() {
     return { ...config, enabled: false };
   }
   return config;
+}
+
+function collectTextValidationStampingConfig() {
+  const config = collectStampingConfig();
+  return config.enabled ? { ...config, enabled: false } : config;
 }
 
 function updateStampSummary() {
@@ -946,15 +1220,36 @@ function updateSequenceCount() {
   updateStampSummary();
 }
 
+function invalidateTextValidation() {
+  if (state.mode !== "text" || !state.lastValidation) return;
+  state.lastValidation = null;
+  state.canBuild = false;
+  state.lastJob = { ...(state.lastJob || {}), status: "uploaded", validation: null, build: null };
+  els.orderValidationNotice.hidden = true;
+  persistState();
+  updateStepper();
+}
+
+function renderOrderValidationNotice(validation) {
+  const stats = getValidationStats(validation);
+  els.orderValidationNotice.hidden = false;
+  els.orderValidationNotice.classList.toggle("has-errors", stats.errors > 0);
+  els.orderValidationTitle.textContent = stats.errors ? "Порядок проверен, есть ошибки" : "✓ Порядок проверен";
+  els.orderValidationText.textContent = stats.errors
+    ? `Найдено документов: ${stats.matched} из ${stats.total} · ошибок: ${stats.errors}. Исправьте порядок или откройте подробности.`
+    : `Найдено документов: ${stats.matched} из ${stats.total} · ошибок: 0. Теперь заполните номера для нанесения и нажмите «Проверить метки».`;
+}
+
 async function validateTextJob() {
   if (!state.jobId) return;
+  const stampingEnabled = els.stampEnabledInput.checked;
   setStatus("Проверяем…", "info");
   els.validateButton.disabled = true;
   try {
     const response = await fetch(`/api/print/jobs/${state.jobId}/validate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sequence: els.sequenceInput.value, stamping: collectStampingConfig() }),
+      body: JSON.stringify({ sequence: els.sequenceInput.value, stamping: collectTextValidationStampingConfig() }),
     });
     const data = await readJson(response);
     if (!response.ok) throw new Error(data.detail || "Не удалось проверить порядок");
@@ -966,10 +1261,24 @@ async function validateTextJob() {
     state.resultLimit = 160;
     persistState();
     renderValidation(data);
-    setStep("check");
+    if (stampingEnabled) {
+      renderOrderValidationNotice(data);
+      setStep("order");
+    } else {
+      els.orderValidationNotice.hidden = true;
+      setStep("check");
+    }
   } catch (error) {
     renderValidationError(error.message);
-    setStep("check");
+    if (stampingEnabled) {
+      els.orderValidationNotice.hidden = false;
+      els.orderValidationNotice.classList.add("has-errors");
+      els.orderValidationTitle.textContent = "Не удалось проверить порядок";
+      els.orderValidationText.textContent = error.message;
+      setStep("order");
+    } else {
+      setStep("check");
+    }
   } finally {
     updateHeader();
     updateSequenceCount();
@@ -1025,8 +1334,15 @@ async function applyStampingToCurrentValidation({ goToCheck = true, toastText = 
     state.canBuild = data.can_build;
     state.activeFilter = getValidationStats(data).errors ? "errors" : "all";
     renderValidation(data);
-    showToast(toastText);
-    if (goToCheck) setStep("check");
+    if (data.can_build) {
+      els.orderValidationNotice.hidden = true;
+      showToast(toastText);
+      if (goToCheck) setStep("check");
+    } else {
+      renderOrderValidationNotice(data);
+      showToast("В метках есть ошибки");
+      setStep("order");
+    }
     return true;
   } catch (error) {
     showToast(error.message);
@@ -1593,7 +1909,8 @@ function renderResult(job) {
   const pages = isExcel ? build.zip?.page_count || 0 : build.merge?.page_count || 0;
   const size = isExcel ? build.zip?.size_bytes || 0 : build.merge?.size_bytes || 0;
   const stampApplied = build.stamping?.applied || 0;
-  els.resultTitle.textContent = isExcel ? `✓ Готово ${pdfCount} PDF` : "✓ PDF готов";
+  const singlePdfName = job.result_pdf_download_name || build.result_pdfs?.[0]?.download_name || "PDF";
+  els.resultTitle.textContent = isExcel ? `✓ Готово ${pdfCount} PDF` : `✓ ${singlePdfName} готов`;
   els.resultMetrics.innerHTML = `
     <div class="metric"><span>Страниц</span><strong>${pages}</strong></div>
     <div class="metric"><span>Размер</span><strong>${formatBytes(size)}</strong></div>
@@ -1601,7 +1918,7 @@ function renderResult(job) {
     <div class="metric"><span>Масштаб</span><strong>100%</strong></div>
   `;
   const primaryHref = isExcel ? `/api/print/jobs/${job.id}/download/zip` : `/api/print/jobs/${job.id}/download/pdf`;
-  const primaryText = isExcel ? `Скачать ZIP с ${pdfCount} PDF` : "Скачать PDF";
+  const primaryText = isExcel ? `Скачать ZIP с ${pdfCount} PDF` : `Скачать ${singlePdfName}`;
   const reportLink = job.report_csv
     ? `<a class="download secondary-link" href="/api/print/jobs/${job.id}/download/report.csv">Скачать отчёт CSV</a>`
     : "";
@@ -1610,7 +1927,7 @@ function renderResult(job) {
     ${reportLink}
   `;
   els.resultBlock.innerHTML = html;
-  els.downloadTitle.textContent = isExcel ? `Готово ${pdfCount} PDF` : "PDF готов";
+  els.downloadTitle.textContent = isExcel ? `Готово ${pdfCount} PDF` : singlePdfName;
   els.downloadActions.innerHTML = html;
   renderPartsList(job);
 }
@@ -1618,7 +1935,7 @@ function renderResult(job) {
 function renderPartsList(job) {
   els.partsList.innerHTML = "";
   const parts = job.build?.result_pdfs || [];
-  if (!parts.length) return;
+  if (!parts.length || !job.result_zip) return;
   const title = document.createElement("h3");
   title.textContent = job.build?.mode === "registration" ? "PDF по партиям" : "PDF по столбцам";
   els.partsList.append(title);
@@ -1626,8 +1943,8 @@ function renderPartsList(job) {
     const row = document.createElement("div");
     row.className = "part-row";
     row.innerHTML = `
-      <strong title="${escapeAttr(part.download_name)}">${escapeHtml(part.title || part.download_name)}</strong>
-      <span>${part.page_count} ${plural(part.page_count, "страница", "страницы", "страниц")}</span>
+      <strong title="${escapeAttr(part.download_name)}">${escapeHtml(part.download_name)}</strong>
+      <span>${escapeHtml(part.title || "PDF")} · ${part.page_count} ${plural(part.page_count, "страница", "страницы", "страниц")}</span>
       <a class="download secondary-link" href="/api/print/jobs/${job.id}/download/part/${index + 1}">Скачать</a>
     `;
     els.partsList.append(row);
@@ -1680,9 +1997,30 @@ function askConfirm({ title, text, okText = "Продолжить", danger = fal
     els.confirmText.textContent = text;
     els.confirmOkButton.textContent = okText;
     els.confirmOkButton.classList.toggle("danger", danger);
+    els.confirmAltButton.hidden = true;
     const onClose = () => {
       els.confirmDialog.removeEventListener("close", onClose);
       resolve(els.confirmDialog.returnValue === "ok");
+    };
+    els.confirmDialog.addEventListener("close", onClose);
+    els.confirmDialog.showModal();
+  });
+}
+
+function askListMergeChoice() {
+  return new Promise((resolve) => {
+    els.confirmTitle.textContent = "Как загрузить дополнительные списки?";
+    els.confirmText.textContent = "В поле уже есть номера. Можно добавить новые строки в конец или полностью заменить текущий список.";
+    els.confirmOkButton.textContent = "Добавить к списку";
+    els.confirmOkButton.classList.remove("danger");
+    els.confirmAltButton.textContent = "Заменить список";
+    els.confirmAltButton.hidden = false;
+    const onClose = () => {
+      els.confirmDialog.removeEventListener("close", onClose);
+      els.confirmAltButton.hidden = true;
+      if (els.confirmDialog.returnValue === "ok") resolve("append");
+      else if (els.confirmDialog.returnValue === "alt") resolve("replace");
+      else resolve("cancel");
     };
     els.confirmDialog.addEventListener("close", onClose);
     els.confirmDialog.showModal();
@@ -1993,7 +2331,30 @@ async function restorePreviousJob() {
 
 els.selectFilesButton.addEventListener("click", () => els.fileInput.click());
 els.fileInput.addEventListener("change", () => {
-  if (els.fileInput.files.length) uploadFiles(els.fileInput.files);
+  if (els.fileInput.files.length) queueRecords([...els.fileInput.files].map((file) => ({ file, relativePath: file.name, source: "file" })));
+  els.fileInput.value = "";
+});
+els.selectFolderButton.addEventListener("click", () => els.folderInput.click());
+els.folderInput.addEventListener("change", () => {
+  if (els.folderInput.files.length) {
+    queueRecords(
+      [...els.folderInput.files].map((file) => ({ file, relativePath: file.webkitRelativePath || file.name, source: "folder" })),
+      { folderSelection: true },
+    );
+  }
+  els.folderInput.value = "";
+});
+els.clearQueueButton.addEventListener("click", () => {
+  state.pendingFiles = [];
+  state.pendingSkipped = 0;
+  state.pendingFolderNames.clear();
+  state.excelFile = null;
+  renderPendingQueue();
+  renderModePanels();
+});
+els.uploadQueueButton.addEventListener("click", () => {
+  if (!state.pendingFiles.length || pendingQueueLimitError()) return;
+  uploadFiles(state.pendingFiles);
 });
 
 ["dragenter", "dragover"].forEach((eventName) => {
@@ -2010,9 +2371,13 @@ els.fileInput.addEventListener("change", () => {
   });
 });
 
-els.dropZone.addEventListener("drop", (event) => {
-  const files = event.dataTransfer.files;
-  if (files.length) uploadFiles(files);
+els.dropZone.addEventListener("drop", async (event) => {
+  try {
+    const records = await droppedRecords(event.dataTransfer);
+    if (records.length) queueRecords(records);
+  } catch (error) {
+    showToast(error.message || "Не удалось прочитать папку");
+  }
 });
 
 els.textModeButton.addEventListener("click", () => selectMode("text"));
@@ -2026,11 +2391,8 @@ els.changeModeButton.addEventListener("click", () => {
 });
 
 els.txtInput.addEventListener("change", async () => {
-  const file = els.txtInput.files[0];
-  if (!file) return;
-  els.sequenceInput.value = await file.text();
-  updateSequenceCount();
-  showToast("Список TXT загружен");
+  await loadSequenceTxtFiles(els.txtInput.files);
+  els.txtInput.value = "";
 });
 
 els.clearSequenceButton.addEventListener("click", async () => {
@@ -2043,12 +2405,29 @@ els.clearSequenceButton.addEventListener("click", async () => {
     });
     if (!ok) return;
   }
+  invalidateTextValidation();
   els.sequenceInput.value = "";
+  state.txtFiles = [];
+  state.sequenceBeforeSort = null;
+  els.undoSortButton.hidden = true;
+  renderTxtFilesSummary();
   updateSequenceCount();
 });
 
-els.sequenceInput.addEventListener("input", updateSequenceCount);
+els.sortSequenceButton.addEventListener("click", () => {
+  sortSequenceNaturally();
+});
+els.undoSortButton.addEventListener("click", () => {
+  undoSequenceSort();
+});
+els.sequenceInput.addEventListener("input", () => {
+  invalidateTextValidation();
+  state.sequenceBeforeSort = null;
+  els.undoSortButton.hidden = true;
+  updateSequenceCount();
+});
 els.validateButton.addEventListener("click", validateTextJob);
+els.viewOrderValidationButton.addEventListener("click", () => setStep("check"));
 
 els.stampEnabledInput.addEventListener("change", renderStampingPanel);
 els.stampTextInput.addEventListener("input", updateStampSummary);
@@ -2170,4 +2549,6 @@ if (!els.registrationYearInput.value) {
   els.registrationYearInput.value = String(new Date().getFullYear());
 }
 restoreStampUiSettings();
+renderPendingQueue();
+renderTxtFilesSummary();
 restorePreviousJob();

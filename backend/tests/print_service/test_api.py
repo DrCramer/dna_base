@@ -113,7 +113,15 @@ def test_full_success_flow_with_mocked_conversion(client, monkeypatch):
     build = client.post(f"/api/print/jobs/{job_id}/build?wait=true")
     assert build.status_code == 200
     assert build.json()["merge"]["page_count"] == 1
-    assert client.get(f"/api/print/jobs/{job_id}/download/pdf").status_code == 200
+    assert build.json()["result_pdfs"][0]["download_name"] == "1-(ее5968).pdf"
+    state = main.load_state(job_id)
+    assert state["result_pdf"] == "result/1-(ее5968).pdf"
+    assert state["validation"]["entries"][0]["result_pdf_name"] == "1-(ее5968).pdf"
+    download = client.get(f"/api/print/jobs/{job_id}/download/pdf")
+    assert download.status_code == 200
+    assert "%D0%B5%D0%B55968" in download.headers["content-disposition"]
+    report = (get_job_dir(job_id) / state["report_csv"]).read_text(encoding="utf-8-sig")
+    assert "1-(ее5968).pdf" in report
     assert client.get(f"/api/print/jobs/{job_id}/download/report.csv").status_code == 200
     assert client.delete(f"/api/print/jobs/{job_id}").status_code == 200
 
@@ -186,12 +194,140 @@ def test_registration_build_creates_party_named_pdfs(client, monkeypatch):
 
     assert build.status_code == 200
     assert build.json()["mode"] == "registration"
-    assert build.json()["result_pdfs"][0]["download_name"] == "194_ии8828-ии6305.pdf"
-    zip_path = main.get_job_dir(job_id) / "result" / "registration-parties.zip"
+    assert build.json()["result_pdfs"][0]["download_name"] == "1-(ии8828-ии6305).pdf"
+    state = main.load_state(job_id)
+    zip_path = main.get_job_dir(job_id) / state["result_zip"]
     with ZipFile(zip_path) as archive:
-        assert "194_ии8828-ии6305.pdf" in archive.namelist()
+        assert "1-(ии8828-ии6305).pdf" in archive.namelist()
         assert "report.csv" not in archive.namelist()
-    assert main.load_state(job_id)["report_csv"] is None
+    assert state["report_csv"] is None
+
+
+def test_excel_build_uses_range_names_in_files_zip_and_report(client, monkeypatch):
+    async def fake_convert_entries(entries, documents, job_dir, settings, progress_callback=None):
+        pdf_paths = []
+        for entry in entries:
+            path = Path(job_dir) / "converted" / f"{entry['doc_id']}.pdf"
+            writer = PdfWriter()
+            writer.add_blank_page(width=595, height=842)
+            with path.open("wb") as handle:
+                writer.write(handle)
+            entry["conversion_status"] = "Готов"
+            entry["pages"] = 1
+            entry["page_size"] = "210.0 × 297.0 мм · A4, книжная"
+            entry["pdf_path"] = str(path.relative_to(job_dir))
+            entry["pdf_analysis"] = {
+                "page_count": 1,
+                "pages": [{"width_mm": 210.0, "height_mm": 297.0, "rotate": 0}],
+                "empty_pages": [],
+            }
+            pdf_paths.append(path)
+        return entries, pdf_paths
+
+    monkeypatch.setattr(main, "convert_entries", fake_convert_entries)
+    upload = client.post(
+        "/api/print/jobs",
+        files=[
+            ("files", ("first.docx", b"first", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+            ("files", ("last.docx", b"last", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+        ],
+    )
+    job_id = upload.json()["id"]
+    documents = upload.json()["documents"]
+    state = main.load_state(job_id)
+    state["status"] = "validated"
+    state["validation"] = {
+        "mode": "excel",
+        "can_build": True,
+        "groups": [
+            {
+                "title": "Столбец A",
+                "column": "A",
+                "validation": {
+                    "total": 1,
+                    "entries": [
+                        {
+                            "order": 1,
+                            "number": "ее5968",
+                            "doc_id": documents[0]["id"],
+                            "status": "Готов",
+                            "blocking": False,
+                            "warnings": [],
+                            "error": "",
+                        }
+                    ],
+                },
+            },
+            {
+                "title": "Столбец B",
+                "column": "B",
+                "validation": {
+                    "total": 1,
+                    "entries": [
+                        {
+                            "order": 1,
+                            "number": "ее6032",
+                            "doc_id": documents[1]["id"],
+                            "status": "Готов",
+                            "blocking": False,
+                            "warnings": [],
+                            "error": "",
+                        }
+                    ],
+                },
+            },
+        ],
+        "stamping": {"config": {"enabled": False}},
+    }
+    main.save_state(job_id, state)
+
+    build = client.post(f"/api/print/jobs/{job_id}/build?wait=true")
+
+    assert build.status_code == 200
+    assert [item["download_name"] for item in build.json()["result_pdfs"]] == [
+        "1-(ее5968).pdf",
+        "2-(ее6032).pdf",
+    ]
+    state = main.load_state(job_id)
+    with ZipFile(main.get_job_dir(job_id) / state["result_zip"]) as archive:
+        assert set(archive.namelist()) == {"1-(ее5968).pdf", "2-(ее6032).pdf", "report.csv"}
+    report = (main.get_job_dir(job_id) / state["report_csv"]).read_text(encoding="utf-8-sig")
+    assert "1-(ее5968).pdf" in report
+    assert "2-(ее6032).pdf" in report
+
+
+@pytest.mark.parametrize(
+    ("index", "entries", "expected"),
+    [
+        (1, [{"number": "ее5968"}], "1-(ее5968).pdf"),
+        (1, [{"number": "ее5968"}, {"number": "ее6032"}], "1-(ее5968-ее6032).pdf"),
+        (2, [{"number": "6606-1"}, {"number": "6610-1"}], "2-(6606-1-6610-1).pdf"),
+        (3, [], "3-(без-диапазона).pdf"),
+    ],
+)
+def test_result_pdf_name_uses_actual_entry_order(index, entries, expected):
+    assert main._result_pdf_name(index, entries) == expected
+
+
+def test_upload_keeps_safe_relative_folder_path(client):
+    response = client.post(
+        "/api/print/jobs",
+        files=[
+            (
+                "files",
+                (
+                    "Партия 200/Группа 1/Акт_ее5968.docx",
+                    b"docx",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ),
+            )
+        ],
+    )
+
+    assert response.status_code == 200
+    document = response.json()["documents"][0]
+    assert document["original_name"] == "Акт_ее5968.docx"
+    assert document["source_relative_path"] == "Партия 200/Группа 1/Акт_ее5968.docx"
 
 
 def test_full_success_flow_with_stamping(client, monkeypatch):

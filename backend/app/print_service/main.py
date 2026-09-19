@@ -51,19 +51,56 @@ from app.print_service.services.stamping_service import (
 
 
 def _safe_download_stem(value: str, fallback: str) -> str:
-    cleaned = re.sub(r"[^0-9A-Za-zА-Яа-яЁё._ -]+", "_", value).strip(" ._-")
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", value).strip(" ._-")
     cleaned = re.sub(r"\s+", "_", cleaned)
-    return (cleaned or fallback)[:80]
+    return (cleaned or fallback)[:120]
+
+
+def _entry_result_number(entry: dict) -> str | None:
+    for field in ("number", "external_military_no", "rcsme_reg_no", "decree_no"):
+        value = str(entry.get(field) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _result_pdf_name(index: int, entries: list[dict]) -> str:
+    first_no = _entry_result_number(entries[0]) if entries else None
+    last_no = _entry_result_number(entries[-1]) if entries else None
+    if not first_no or not last_no:
+        range_label = "без-диапазона"
+    elif first_no == last_no:
+        range_label = first_no
+    else:
+        range_label = f"{first_no}-{last_no}"
+    fallback = f"{index}-(без-диапазона)"
+    stem = _safe_download_stem(f"{index}-({range_label})", fallback)
+    return f"{stem}.pdf"
+
+
+def _result_range(entries: list[dict]) -> tuple[str | None, str | None]:
+    return (
+        _entry_result_number(entries[0]) if entries else None,
+        _entry_result_number(entries[-1]) if entries else None,
+    )
 
 
 def _registration_pdf_name(entries: list[dict], fallback: str) -> str:
-    if not entries:
-        return f"{fallback}.pdf"
-    party_no = str(entries[0].get("party_no") or fallback)
-    first_no = str(entries[0].get("external_military_no") or entries[0].get("rcsme_reg_no") or "first")
-    last_no = str(entries[-1].get("external_military_no") or entries[-1].get("rcsme_reg_no") or "last")
-    stem = _safe_download_stem(f"{party_no}_{first_no}-{last_no}", fallback)
-    return f"{stem}.pdf"
+    match = re.search(r"(\d+)$", fallback)
+    index = int(match.group(1)) if match else 1
+    return _result_pdf_name(index, entries)
+
+
+def _result_zip_name(result_pdfs: list[dict]) -> str:
+    if not result_pdfs:
+        return "pdf-(без-диапазона).zip"
+    first_number = result_pdfs[0].get("first_number") or "без-диапазона"
+    last_number = result_pdfs[-1].get("last_number") or "без-диапазона"
+    stem = _safe_download_stem(
+        f"pdf-1-{len(result_pdfs)}-({first_number}-{last_number})",
+        f"pdf-1-{len(result_pdfs)}",
+    )
+    return f"{stem}.zip"
 
 
 def _registration_entry_groups(entries: list[dict]) -> list[tuple[str, list[dict]]]:
@@ -258,7 +295,14 @@ async def index(request: Request, user: User = Depends(current_user)):
     can_edit = str(user.role) in {"admin", "user"}
     return templates.TemplateResponse(
         "index.html",
-        {"request": request, "embedded": embedded, "can_edit": can_edit},
+        {
+            "request": request,
+            "embedded": embedded,
+            "can_edit": can_edit,
+            "max_files": settings.max_files,
+            "max_upload_mb": settings.max_upload_mb,
+            "max_single_file_mb": settings.max_single_file_mb,
+        },
     )
 
 
@@ -342,7 +386,9 @@ async def validate_job(job_id: str, payload: SequencePayload):
     state["status"] = "validated"
     state["build"] = None
     state["result_pdf"] = None
+    state["result_pdf_download_name"] = None
     state["result_zip"] = None
+    state["result_zip_download_name"] = None
     state["report_csv"] = None
     save_state(job_id, state)
     report = {"job_id": job_id, "validation": validation, "build": None}
@@ -389,7 +435,9 @@ async def validate_excel_job(
     state["status"] = "validated"
     state["build"] = None
     state["result_pdf"] = None
+    state["result_pdf_download_name"] = None
     state["result_zip"] = None
+    state["result_zip_download_name"] = None
     state["report_csv"] = None
     save_state(job_id, state)
     flat_entries = [
@@ -437,7 +485,9 @@ async def apply_registration_to_job(
     state["status"] = "validated"
     state["build"] = None
     state["result_pdf"] = None
+    state["result_pdf_download_name"] = None
     state["result_zip"] = None
+    state["result_zip_download_name"] = None
     state["report_csv"] = "result/report.csv"
     state["error"] = None
     save_state(job_id, state)
@@ -567,10 +617,11 @@ async def _run_build_job(job_id: str):
             job_dir,
             validation.get("stamping", {}).get("config"),
         )
+        download_name = _result_pdf_name(1, converted_entries)
         for page_index, entry in enumerate(converted_entries, start=1):
             entry["final_page"] = page_index
-            entry["result_pdf_name"] = "result.pdf"
-        output_pdf = job_dir / "result" / "result.pdf"
+            entry["result_pdf_name"] = download_name
+        output_pdf = job_dir / "result" / download_name
         merge = merge_pdfs(stamped_paths, output_pdf)
         report_csv = job_dir / "result" / "report.csv"
         write_csv_report(converted_entries, report_csv)
@@ -580,11 +631,25 @@ async def _run_build_job(job_id: str):
             "warnings": build_warnings,
             "merge": merge,
             "stamping": stamp_summary,
+            "result_pdfs": [
+                {
+                    "title": download_name,
+                    "download_name": download_name,
+                    "path": str(output_pdf.relative_to(job_dir)),
+                    "page_count": merge["page_count"],
+                    "size_bytes": merge["size_bytes"],
+                    "stamping": stamp_summary,
+                    "first_number": _result_range(converted_entries)[0],
+                    "last_number": _result_range(converted_entries)[1],
+                }
+            ],
             "message": "PDF собран без масштабирования страниц.",
             "print_warning": "При печати выберите «Фактический размер» или «100%».",
         }
-        state["result_pdf"] = "result/result.pdf"
+        state["result_pdf"] = str(output_pdf.relative_to(job_dir))
+        state["result_pdf_download_name"] = download_name
         state["result_zip"] = None
+        state["result_zip_download_name"] = None
         state["report_csv"] = "result/report.csv"
         state["status"] = "ready"
         state["error"] = None
@@ -670,7 +735,7 @@ async def _build_registration_job(job_id: str, state: dict):
                 job_dir,
                 validation.get("stamping", {}).get("config"),
             )
-            download_name = _registration_pdf_name(converted_entries, f"party_{group_index:02d}")
+            download_name = _result_pdf_name(group_index, converted_entries)
             output_pdf = output_dir / download_name
             merge = merge_pdfs(stamped_paths, output_pdf)
             for page_index, entry in enumerate(converted_entries, start=1):
@@ -685,12 +750,15 @@ async def _build_registration_job(job_id: str, state: dict):
                     "page_count": merge["page_count"],
                     "size_bytes": merge["size_bytes"],
                     "stamping": stamp_summary,
+                    "first_number": _result_range(converted_entries)[0],
+                    "last_number": _result_range(converted_entries)[1],
                 }
             )
             converted_all.extend(converted_entries)
             completed += len(converted_entries)
 
-        zip_path = job_dir / "result" / "registration-parties.zip"
+        zip_download_name = _result_zip_name(result_pdfs)
+        zip_path = job_dir / "result" / zip_download_name
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for pdf in result_pdfs:
                 archive.write(job_dir / pdf["path"], arcname=pdf["download_name"])
@@ -708,6 +776,7 @@ async def _build_registration_job(job_id: str, state: dict):
             },
             "zip": {
                 "path": str(zip_path.relative_to(job_dir)),
+                "download_name": zip_download_name,
                 "size_bytes": zip_path.stat().st_size,
                 "pdf_count": len(result_pdfs),
                 "page_count": sum(pdf["page_count"] for pdf in result_pdfs),
@@ -716,7 +785,9 @@ async def _build_registration_job(job_id: str, state: dict):
             "print_warning": "При печати выберите «Фактический размер» или «100%».",
         }
         state["result_pdf"] = None
-        state["result_zip"] = "result/registration-parties.zip"
+        state["result_pdf_download_name"] = None
+        state["result_zip"] = str(zip_path.relative_to(job_dir))
+        state["result_zip_download_name"] = zip_download_name
         state["report_csv"] = None
         state["status"] = "ready"
         state["error"] = None
@@ -807,8 +878,8 @@ async def _build_excel_job(job_id: str, state: dict):
                 job_dir,
                 validation.get("stamping", {}).get("config"),
             )
-            stem = _safe_download_stem(group["title"], f"part_{group_index:02d}")
-            output_pdf = output_dir / f"{group_index:02d}_{stem}.pdf"
+            download_name = _result_pdf_name(group_index, converted_entries)
+            output_pdf = output_dir / download_name
             merge = merge_pdfs(stamped_paths, output_pdf)
             for page_index, entry in enumerate(converted_entries, start=1):
                 entry["final_page"] = page_index
@@ -823,6 +894,8 @@ async def _build_excel_job(job_id: str, state: dict):
                     "page_count": merge["page_count"],
                     "size_bytes": merge["size_bytes"],
                     "stamping": stamp_summary,
+                    "first_number": _result_range(converted_entries)[0],
+                    "last_number": _result_range(converted_entries)[1],
                 }
             )
             updated_group = copy.deepcopy(group)
@@ -843,7 +916,8 @@ async def _build_excel_job(job_id: str, state: dict):
                 total_groups=total_groups,
             )
 
-        zip_path = job_dir / "result" / "result-parts.zip"
+        zip_download_name = _result_zip_name(result_pdfs)
+        zip_path = job_dir / "result" / zip_download_name
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for pdf in result_pdfs:
                 archive.write(job_dir / pdf["path"], arcname=pdf["download_name"])
@@ -864,6 +938,7 @@ async def _build_excel_job(job_id: str, state: dict):
             },
             "zip": {
                 "path": str(zip_path.relative_to(job_dir)),
+                "download_name": zip_download_name,
                 "size_bytes": zip_path.stat().st_size,
                 "pdf_count": len(result_pdfs),
                 "page_count": sum(pdf["page_count"] for pdf in result_pdfs),
@@ -872,7 +947,9 @@ async def _build_excel_job(job_id: str, state: dict):
             "print_warning": "При печати выберите «Фактический размер» или «100%».",
         }
         state["result_pdf"] = None
-        state["result_zip"] = "result/result-parts.zip"
+        state["result_pdf_download_name"] = None
+        state["result_zip"] = str(zip_path.relative_to(job_dir))
+        state["result_zip_download_name"] = zip_download_name
         state["report_csv"] = "result/report.csv"
         state["status"] = "ready"
         state["error"] = None
@@ -912,7 +989,9 @@ async def update_stamping(job_id: str, payload: StampingPayload):
     state["status"] = "validated"
     state["build"] = None
     state["result_pdf"] = None
+    state["result_pdf_download_name"] = None
     state["result_zip"] = None
+    state["result_zip_download_name"] = None
     save_state(job_id, state)
     if validation.get("mode") == "excel":
         flat_entries = [
@@ -989,7 +1068,8 @@ async def download_pdf(job_id: str):
     path = get_job_dir(job_id) / state["result_pdf"]
     if not path.exists():
         raise HTTPException(status_code=404, detail="Итоговый PDF не найден")
-    return FileResponse(path, media_type="application/pdf", filename=f"docx-print-order-{job_id}.pdf")
+    download_name = state.get("result_pdf_download_name") or path.name
+    return FileResponse(path, media_type="application/pdf", filename=download_name)
 
 
 @api_router.get("/jobs/{job_id}/download/zip")
@@ -1000,7 +1080,8 @@ async def download_zip(job_id: str):
     path = get_job_dir(job_id) / state["result_zip"]
     if not path.exists():
         raise HTTPException(status_code=404, detail="ZIP с итоговыми PDF не найден")
-    return FileResponse(path, media_type="application/zip", filename=f"docx-print-order-{job_id}.zip")
+    download_name = state.get("result_zip_download_name") or (state.get("build") or {}).get("zip", {}).get("download_name") or path.name
+    return FileResponse(path, media_type="application/zip", filename=download_name)
 
 
 @api_router.get("/jobs/{job_id}/download/part/{part_index}")

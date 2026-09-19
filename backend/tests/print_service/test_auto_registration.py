@@ -152,4 +152,4 @@ def test_registration_pdf_groups_keep_party_and_external_number_order():
     groups = _registration_entry_groups(entries)
 
     assert [party_no for party_no, _rows in groups] == ["194", "195"]
-    assert _registration_pdf_name(groups[0][1], "party_01") == "194_ии8828-ии6305.pdf"
+    assert _registration_pdf_name(groups[0][1], "party_01") == "1-(ии8828-ии6305).pdf"

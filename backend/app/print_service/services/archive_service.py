@@ -29,6 +29,14 @@ def _safe_original_name(name: str) -> str:
     return Path(name.replace("\\", "/")).name.strip() or "file"
 
 
+def _safe_relative_path(name: str) -> str | None:
+    normalized = posixpath.normpath(name.replace("\\", "/").strip())
+    path = PurePosixPath(normalized)
+    if normalized in {"", "."} or normalized.startswith("../") or path.is_absolute():
+        return None
+    return normalized if len(path.parts) > 1 else None
+
+
 def _extension(name: str) -> str:
     return Path(name).suffix.lower()
 
@@ -80,21 +88,23 @@ def _copy_docx_from_file(
     original_name: str,
     job_dir: Path,
     settings: Settings,
+    source_relative_path: str | None = None,
 ) -> None:
     if len(documents) >= settings.max_files:
         raise UploadValidationError(f"Превышен лимит файлов: {settings.max_files}")
     safe_name = f"doc_{len(documents) + 1:06d}.docx"
     destination = job_dir / "input" / safe_name
     shutil.copyfile(source, destination)
-    documents.append(
-        {
-            "id": safe_name.removesuffix(".docx"),
-            "original_name": original_name,
-            "safe_name": safe_name,
-            "path": str(destination.relative_to(job_dir)),
-            "size": destination.stat().st_size,
-        }
-    )
+    document = {
+        "id": safe_name.removesuffix(".docx"),
+        "original_name": original_name,
+        "safe_name": safe_name,
+        "path": str(destination.relative_to(job_dir)),
+        "size": destination.stat().st_size,
+    }
+    if source_relative_path:
+        document["source_relative_path"] = source_relative_path
+    documents.append(document)
 
 
 def _copy_docx_from_zip(
@@ -167,7 +177,9 @@ async def accept_uploads(files: list[UploadFile], job_dir: Path, settings: Setti
     documents: list[dict] = []
     total_upload = 0
     for index, upload in enumerate(files, start=1):
-        original = _safe_original_name(upload.filename or f"upload-{index}")
+        upload_name = upload.filename or f"upload-{index}"
+        original = _safe_original_name(upload_name)
+        source_relative_path = _safe_relative_path(upload_name)
         ext = _extension(original)
         if ext not in {".docx", ".zip", ".txt"}:
             raise UploadValidationError(f"Неподдерживаемый тип файла: {original}")
@@ -186,7 +198,14 @@ async def accept_uploads(files: list[UploadFile], job_dir: Path, settings: Setti
         if ext == ".docx":
             if original.startswith("~$"):
                 continue
-            _copy_docx_from_file(upload_path, documents, original, job_dir, settings)
+            _copy_docx_from_file(
+                upload_path,
+                documents,
+                original,
+                job_dir,
+                settings,
+                source_relative_path=source_relative_path,
+            )
         elif ext == ".zip":
             extract_zip(upload_path, documents, job_dir, settings)
         else:
