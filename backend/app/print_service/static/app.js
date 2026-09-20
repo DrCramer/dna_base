@@ -312,7 +312,7 @@ function updateHeader() {
   const reportReady = Boolean(state.jobId && state.lastJob?.report_csv);
   els.menuReportLink.href = reportReady ? `/api/print/jobs/${state.jobId}/download/report.csv` : "#";
   els.menuReportLink.setAttribute("aria-disabled", reportReady ? "false" : "true");
-  els.downloadBar.hidden = state.lastJob?.status !== "ready";
+  els.downloadBar.hidden = state.lastJob?.status !== "ready" || state.currentStep === "result";
 }
 
 function setStatus(text, type) {
@@ -444,14 +444,21 @@ function renderPendingQueue() {
   const bytes = records.reduce((sum, record) => sum + queuedFile(record).size, 0);
   const folderCount = state.pendingFolderNames.size;
   const individualCount = records.filter((record) => record.source === "file").length;
-  els.pendingQueueTitle.textContent = `${docx} DOCX · ${zip} ZIP · ${formatBytes(bytes)}`;
-  els.pendingQueueSummary.textContent = `Источники: ${folderCount} ${plural(folderCount, "папка", "папки", "папок")} + ${individualCount} ${plural(individualCount, "отдельный файл", "отдельных файла", "отдельных файлов")}${xlsx ? ` · XLSX: ${xlsx}` : ""}`;
+  els.pendingQueueTitle.textContent = "Подготовлено к загрузке:";
+  els.pendingQueueSummary.innerHTML = `
+    <span>Документов: <strong>${docx}</strong></span>
+    <span>Папок: <strong>${folderCount}</strong></span>
+    <span>Отдельных файлов: <strong>${individualCount}</strong></span>
+    ${zip ? `<span>ZIP-архивов: <strong>${zip}</strong></span>` : ""}
+    ${xlsx ? `<span>Excel-файлов: <strong>${xlsx}</strong></span>` : ""}
+    <span>Размер: <strong>${formatBytes(bytes)}</strong></span>
+  `;
   els.pendingQueueHint.textContent = state.pendingSkipped
     ? `${state.pendingSkipped} ${plural(state.pendingSkipped, "неподдерживаемый файл пропущен", "неподдерживаемых файла пропущено", "неподдерживаемых файлов пропущено")}`
     : "Можно добавить ещё файлы или папки перед загрузкой.";
   const error = pendingQueueLimitError();
   els.uploadQueueButton.disabled = Boolean(error) || docx + zip === 0;
-  els.uploadQueueButton.textContent = `Загрузить ${docx + zip} ${plural(docx + zip, "источник", "источника", "источников")}`;
+  els.uploadQueueButton.textContent = "Загрузить документы";
   if (error) els.pendingQueueHint.textContent = error;
 }
 
@@ -544,6 +551,7 @@ function showErrorInOrder(message) {
     els.uploadStatus.textContent = "Ошибка загрузки";
     els.uploadStatus.className = "status-pill bad";
     els.acceptedCount.textContent = message;
+    els.excelCountText.hidden = false;
     els.excelCountText.textContent = "Загрузка не завершена";
   } else {
     els.resultsArea.append(node);
@@ -560,7 +568,8 @@ function renderUploadSummary(job) {
   els.uploadStatus.textContent = job?.status === "ready" ? "✓ Задание восстановлено" : "✓ Документы загружены";
   els.uploadStatus.className = "status-pill good";
   els.acceptedCount.textContent = `Загружено ${docs.length} ${plural(docs.length, "DOCX", "DOCX", "DOCX")}`;
-  els.excelCountText.textContent = state.excelFile ? `1 файл Excel: ${state.excelFile.name}` : "Excel-файл не выбран";
+  els.excelCountText.hidden = !state.excelFile;
+  els.excelCountText.textContent = state.excelFile ? `Выбран Excel-файл: ${state.excelFile.name}` : "";
 }
 
 function selectMode(mode) {
@@ -589,11 +598,11 @@ function renderModePanels() {
   els.previewRegistrationButton.disabled = !canEdit || !state.jobId;
   els.applyRegistrationButton.disabled = !canEdit || !state.registrationPreview || Boolean(state.registrationPreview.conflicts?.length);
   if (state.mode === "text") {
-    els.selectedModeText.textContent = "Выбран способ: один список";
+    els.selectedModeText.textContent = "Выбран способ: Один список. Вставьте номера или загрузите TXT, затем нажмите «Проверить порядок».";
   } else if (state.mode === "excel") {
-    els.selectedModeText.textContent = "Выбран способ: таблица Excel";
+    els.selectedModeText.textContent = "Выбран способ: Таблица Excel. Загрузите Excel-файл и нажмите «Проверить Excel».";
   } else if (state.mode === "registration") {
-    els.selectedModeText.textContent = "Выбран способ: новые партии с автонумерацией";
+    els.selectedModeText.textContent = "Выбран способ: Новые партии. Заполните данные и проверьте будущие партии.";
   }
   updateSequenceCount();
   renderExcelState();
@@ -627,14 +636,14 @@ function renderStampingPanel() {
     els.stampEnabledInput.checked = true;
   }
   els.stampEnabledInput.disabled = isRegistration;
-  els.stampPanelTitle.textContent = isRegistration ? "Нанести № постановления на документы" : "Нанести номера на документы";
+  els.stampPanelTitle.textContent = isRegistration ? "Нанести № постановления на документы" : "Нанести номера на документы (необязательно)";
   els.stampPanelSubtitle.textContent = isRegistration
     ? "Номера формируются из создаваемой регистрации, здесь настраивается только внешний вид нанесения."
-    : "Готовые метки будут нанесены построчно, без генерации и сортировки.";
-  els.stampControlsTitle.textContent = isRegistration ? "Настройки нанесения" : "Номера на документах";
+    : "Готовые номера будут нанесены на документы по строкам, в указанном порядке.";
+  els.stampControlsTitle.textContent = isRegistration ? "Настройки нанесения" : "Номера для нанесения на документы";
   els.stampControlsSubtitle.textContent = isRegistration
     ? "Выберите угол, поворот, отступы, размер шрифта, фон и рамку для системного номера."
-    : "Добавьте готовый список в том же порядке, что и документы. Одна строка — один документ.";
+    : "Загрузите или вставьте номера, которые нужно напечатать на каждом документе. Один номер — одна строка. Порядок строк должен совпадать с порядком документов.";
   const enabled = isRegistration || els.stampEnabledInput.checked;
   els.stampControls.hidden = !enabled;
   els.stampSourceActions.hidden = isRegistration;
@@ -680,24 +689,11 @@ function renderStampGroupInputs() {
 function renderExcelState() {
   if (state.lastValidation?.mode === "excel") {
     const groups = state.lastValidation.groups || [];
-    els.excelFileState.innerHTML = "";
-    const cards = document.createElement("div");
-    cards.className = "metric-grid";
-    groups.slice(0, 12).forEach((group) => {
-      const entries = group.validation?.entries || [];
-      const first = entries[0]?.number || "—";
-      const last = entries[entries.length - 1]?.number || "—";
-      const card = document.createElement("div");
-      card.className = "metric";
-      card.innerHTML = `
-        <span>${escapeHtml(group.column)}</span>
-        <strong>${escapeHtml(group.title)}</strong>
-        <small>${entries.length} ${plural(entries.length, "номер", "номера", "номеров")} · первый ${escapeHtml(first)} · последний ${escapeHtml(last)}</small>
-      `;
-      cards.append(card);
-    });
-    els.excelFileState.append(cards);
-    els.excelModeHint.textContent = `Проверено столбцов: ${groups.length}`;
+    const documents = groups.reduce((sum, group) => sum + (group.validation?.entries?.length || 0), 0);
+    els.excelFileState.textContent = `Файл проверен: ${state.excelFile?.name || "Excel"}. Документов: ${documents}. Будет создано PDF: ${groups.length}.`;
+    els.excelModeHint.textContent = els.stampEnabledInput.checked
+      ? `Excel проверен: ${groups.length} ${plural(groups.length, "PDF", "PDF", "PDF")}. Теперь загрузите номера для нанесения и нажмите «Проверить метки».`
+      : `Excel проверен. Будет создано PDF: ${groups.length}.`;
   } else if (state.excelFile) {
     els.excelFileState.textContent = `Выбран файл: ${state.excelFile.name}`;
     els.excelModeHint.textContent = "Нажмите «Проверить Excel», чтобы найти столбцы и документы.";
@@ -1287,7 +1283,8 @@ async function validateTextJob() {
 
 async function validateExcelJob() {
   if (!state.jobId || !state.excelFile) return;
-  setStatus("Проверяем Excel…", "info");
+  const stampingEnabled = els.stampEnabledInput.checked;
+  setStatus("Проверяем Excel-файл…", "info");
   els.validateExcelButton.disabled = true;
   const formData = new FormData();
   formData.append("file", state.excelFile);
@@ -1308,7 +1305,7 @@ async function validateExcelJob() {
     persistState();
     renderModePanels();
     renderValidation(data);
-    setStep("check");
+    setStep(stampingEnabled ? "order" : "check");
   } catch (error) {
     renderValidationError(error.message);
     setStep("check");
@@ -1428,23 +1425,22 @@ function renderValidationError(message) {
 function renderValidation(validation) {
   const stats = getValidationStats(validation);
   els.checkSubtitle.textContent = stats.errors
-    ? `Нужно исправить ${stats.errors} ${plural(stats.errors, "ошибку", "ошибки", "ошибок")}.`
-    : "Ошибок нет. Можно запускать сборку.";
+    ? "Есть ошибки, сборку запускать нельзя."
+    : "Можно запускать сборку.";
 
   const title = stats.errors
-    ? `✕ Нужно исправить ${stats.errors} ${plural(stats.errors, "ошибку", "ошибки", "ошибок")}`
-    : "✓ Всё готово к сборке";
+    ? "Сначала исправьте ошибки"
+    : "Всё готово к сборке";
   els.validationSummary.innerHTML = `
     <div class="summary-title">
       <h3>${escapeHtml(title)}</h3>
-      <span class="status-pill ${stats.errors ? "bad" : stats.warnings ? "warn" : "good"}">${stats.errors ? "Сборка заблокирована" : stats.warnings ? "Есть предупреждения" : "Готово"}</span>
+      <span class="status-pill ${stats.errors ? "bad" : "good"}">${stats.errors ? "Сборка недоступна" : "Можно собирать"}</span>
     </div>
     <div class="metric-grid">
-      <div class="metric"><span>Номеров</span><strong>${stats.total}</strong></div>
-      <div class="metric"><span>Найдено документов</span><strong>${stats.matched}</strong></div>
+      <div class="metric"><span>Документов</span><strong>${stats.matched}</strong></div>
+      <div class="metric"><span>PDF будет создано</span><strong>${stats.pdfCount}</strong></div>
       <div class="metric"><span>Ошибок</span><strong>${stats.errors}</strong></div>
-      <div class="metric"><span>PDF</span><strong>${stats.pdfCount}</strong></div>
-      <div class="metric"><span>Меток нанесения</span><strong>${stats.stampLabels}</strong></div>
+      <div class="metric"><span>Предупреждений</span><strong>${stats.warnings}</strong></div>
     </div>
   `;
 
@@ -1489,11 +1485,7 @@ function getValidationStats(validation) {
 
 function renderWarningGroups(validation, stats) {
   els.warningGroups.innerHTML = "";
-  if (!stats.warnings) {
-    const card = createIssueCard("✓ Предупреждений нет", "PDF будет собран без дополнительных замечаний.", "", "success");
-    els.warningGroups.append(card);
-    return;
-  }
+  if (!stats.warnings) return;
   const groups = new Map();
   flatEntries(validation).forEach((entry) => {
     (entry.warnings || []).forEach((warning) => {
@@ -1505,16 +1497,21 @@ function renderWarningGroups(validation, stats) {
     const key = warning.replace(/\d+$/, "").trim() || warning;
     groups.set(key, (groups.get(key) || 0) + 1);
   });
-  const summary = createIssueCard(
-    `${groups.size || 1} ${plural(groups.size || 1, "тип", "типа", "типов")} предупреждений`,
-    `Затронуто ${stats.warningEntries || stats.warnings} ${plural(stats.warningEntries || stats.warnings, "документ", "документа", "документов")}. Это не блокирует сборку.`,
-    "PDF всё равно будет собран без изменения масштаба.",
-    "warning",
-  );
-  els.warningGroups.append(summary);
-  [...groups.entries()].slice(0, 4).forEach(([message, count]) => {
-    els.warningGroups.append(createIssueCard(`${count} — ${message}`, "", "", "warning"));
+  const details = document.createElement("details");
+  details.className = "warning-details";
+  const firstWarning = [...groups.keys()][0] || "Проверьте дополнительные замечания.";
+  details.innerHTML = `
+    <summary>
+      <span><strong>Есть предупреждения: ${stats.warnings}</strong><small>Например: ${escapeHtml(firstWarning)}</small></span>
+      <span class="details-action">Показать подробности</span>
+    </summary>
+    <div class="warning-detail-list"></div>
+  `;
+  const list = details.querySelector(".warning-detail-list");
+  [...groups.entries()].forEach(([message, count]) => {
+    list.append(createIssueCard(`${count} — ${message}`, "", "", "warning"));
   });
+  els.warningGroups.append(details);
 }
 
 function createIssueCard(title, text, action, type) {
@@ -1537,13 +1534,17 @@ function createIssueCard(title, text, action, type) {
 }
 
 function renderFilterButtons(stats) {
-  els.resultTools.hidden = false;
+  els.resultTools.hidden = !stats.errors;
+  if (!stats.errors) {
+    els.filterButtons.innerHTML = "";
+    return;
+  }
   const filters = [
     ["all", `Все ${stats.total}`],
-    ["errors", `Ошибки ${stats.errors}`],
-    ["warnings", `Предупреждения ${stats.warningEntries}`],
-    ["ready", `Готово ${stats.ready}`],
+    ...(stats.errors ? [["errors", `Только ошибки ${stats.errors}`]] : []),
+    ["ready", `Только готовые ${stats.ready}`],
   ];
+  if (!filters.some(([key]) => key === state.activeFilter)) state.activeFilter = "all";
   els.filterButtons.innerHTML = "";
   filters.forEach(([key, label]) => {
     const button = document.createElement("button");
@@ -1589,24 +1590,21 @@ function renderResults(validation) {
 function renderTextResults(validation) {
   const stats = getValidationStats(validation);
   const filtered = filterEntries(validation.entries || []);
-  if (!stats.errors && state.activeFilter === "all" && state.resultLimit <= 160) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "secondary load-more";
-    button.textContent = `Показать все ${stats.total} ${plural(stats.total, "строку", "строки", "строк")}`;
-    button.addEventListener("click", () => {
-      state.resultLimit = 500;
-      renderResults(state.lastValidation);
-    });
-    els.resultsArea.append(createIssueCard("Успешные строки скрыты", "Ошибок нет, поэтому большой список не раскрыт автоматически.", "", "success"));
-    els.resultsArea.append(button);
-    return;
-  }
+  if (!stats.errors) return;
   renderEntriesTable(filtered, "text");
 }
 
 function renderExcelResults(validation) {
-  const groups = validation.groups || [];
+  const groups = (validation.groups || []).filter((group) => {
+    const entries = group.validation?.entries || [];
+    if (state.activeFilter === "errors") return entries.some((entry) => entry.blocking);
+    if (state.activeFilter === "ready") return entries.every((entry) => !entry.blocking);
+    const query = els.resultSearch.value.trim().toLocaleLowerCase("ru");
+    if (!query) return true;
+    return [group.title, ...entries.flatMap((entry) => [entry.number, entry.matched_file])]
+      .filter(Boolean)
+      .some((value) => String(value).toLocaleLowerCase("ru").includes(query));
+  });
   const table = document.createElement("div");
   table.className = "table-wrap";
   const rows = groups.map((group, index) => excelGroupRow(group, index)).join("");
@@ -1614,13 +1612,10 @@ function renderExcelResults(validation) {
     <table>
       <thead>
         <tr>
-          <th style="width: 110px">Столбец</th>
-          <th>Название PDF</th>
-          <th style="width: 120px">Номеров</th>
-          <th style="width: 120px">Найдено</th>
-          <th style="width: 120px">Меток</th>
-          <th style="width: 120px">Страниц</th>
+          <th>PDF</th>
+          <th style="width: 140px">Документов</th>
           <th style="width: 150px">Статус</th>
+          <th style="width: 130px"></th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -1648,20 +1643,15 @@ function excelGroupRow(group, index) {
   const errors = entries.filter((entry) => entry.blocking).length;
   const warnings = entries.filter((entry) => entry.warnings?.length).length;
   const found = entries.filter((entry) => entry.doc_id).length;
-  const stampLabels = group.stamping?.summary?.labels || entries.filter((entry) => entry.stamp_label).length;
   const statusClass = errors ? "bad" : warnings ? "warn" : "good";
   const status = errors ? `${errors} ошибок` : warnings ? `${warnings} предупреждений` : "Готов";
-  const pages = group.merge?.page_count || group.validation?.entries?.reduce((sum, entry) => sum + (entry.pages || 0), 0) || "—";
   const expanded = state.expandedGroups.has(group.id || String(index));
   return `
     <tr>
-      <td><button class="row-action secondary" type="button" data-expand-group="${index}">${expanded ? "▾" : "▸"} ${escapeHtml(group.column)}</button></td>
       <td class="truncate" title="${escapeAttr(group.title)}">${escapeHtml(group.title)}</td>
-      <td>${entries.length}</td>
       <td>${found}</td>
-      <td>${stampLabels || "—"}</td>
-      <td>${pages}</td>
       <td><span class="badge ${statusClass}">${escapeHtml(status)}</span></td>
+      <td><button class="row-action secondary" type="button" data-expand-group="${index}">${expanded ? "Скрыть" : "Подробнее"}</button></td>
     </tr>
   `;
 }
@@ -1674,9 +1664,7 @@ function excelGroupCard(group, index) {
   node.className = "mobile-card";
   node.innerHTML = `
     <strong>${escapeHtml(group.title)}</strong>
-    <span>Столбец ${escapeHtml(group.column)} · ${entries.length} ${plural(entries.length, "номер", "номера", "номеров")}</span>
-    <span>Найдено: ${found}</span>
-    <span>Меток: ${group.stamping?.summary?.labels || "—"}</span>
+    <span>Документов: ${found}</span>
     <span class="badge ${errors ? "bad" : "good"}">${errors ? `${errors} ошибок` : "Готов"}</span>
   `;
   const button = document.createElement("button");
@@ -1698,8 +1686,7 @@ function filterEntries(entries) {
   const query = els.resultSearch.value.trim().toLocaleLowerCase("ru");
   return entries.filter((entry) => {
     if (state.activeFilter === "errors" && !entry.blocking) return false;
-    if (state.activeFilter === "warnings" && !entry.warnings?.length) return false;
-    if (state.activeFilter === "ready" && (entry.blocking || entry.warnings?.length)) return false;
+    if (state.activeFilter === "ready" && entry.blocking) return false;
     if (!query) return true;
     return [entry.number, entry.matched_file, entry.error, entry.status]
       .filter(Boolean)
@@ -1811,22 +1798,17 @@ function showProgress(build) {
   els.progressBar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
   const done = build?.done ?? 0;
   const total = build?.total ?? 0;
-  const remaining = Math.max(0, total - done);
   const pipeline = [els.pipelineCheck, els.pipelineConvert, els.pipelineMerge, els.pipelineDownload];
   const activeIndex = percent >= 99 ? 3 : percent >= 88 ? 2 : 1;
   pipeline.forEach((item, index) => {
     item?.classList.toggle("done", index < activeIndex || percent >= 100);
     item?.classList.toggle("active", index === activeIndex && percent < 100);
   });
-  els.progressText.textContent = `${done} из ${total} документов · ${percent}%`;
-  els.progressDetails.innerHTML = `
-    <span class="badge info">Этап: преобразование DOCX в PDF</span>
-    <span class="badge good">Готово: ${done}</span>
-    <span class="badge neutral">Осталось: ${remaining}</span>
-    <span class="badge neutral">Оцениваем оставшееся время…</span>
-  `;
-  if (build?.current_group) {
-    els.progressDetails.insertAdjacentHTML("beforeend", `<span class="badge info">${escapeHtml(build.current_group)}</span>`);
+  els.progressText.textContent = `Готово: ${done} из ${total} документов (${Math.round(percent)}%)`;
+  els.progressDetails.innerHTML = "";
+  if (build?.total_groups) {
+    const current = Math.min(build.total_groups, (build.done_groups || 0) + 1);
+    els.progressDetails.innerHTML = `<span>Сейчас обрабатывается: PDF ${current} из ${build.total_groups}</span>`;
   }
 }
 
@@ -1914,21 +1896,26 @@ function renderResult(job) {
   els.resultMetrics.innerHTML = `
     <div class="metric"><span>Страниц</span><strong>${pages}</strong></div>
     <div class="metric"><span>Размер</span><strong>${formatBytes(size)}</strong></div>
-    <div class="metric"><span>Меток нанесено</span><strong>${stampApplied}</strong></div>
-    <div class="metric"><span>Масштаб</span><strong>100%</strong></div>
+    ${stampApplied ? `<div class="metric"><span>Номеров нанесено</span><strong>${stampApplied}</strong></div>` : ""}
   `;
   const primaryHref = isExcel ? `/api/print/jobs/${job.id}/download/zip` : `/api/print/jobs/${job.id}/download/pdf`;
   const primaryText = isExcel ? `Скачать ZIP с ${pdfCount} PDF` : `Скачать ${singlePdfName}`;
   const reportLink = job.report_csv
     ? `<a class="download secondary-link" href="/api/print/jobs/${job.id}/download/report.csv">Скачать отчёт CSV</a>`
     : "";
+  const mappingLink = job.number_mapping_xlsx
+    ? `<a class="download secondary-link" href="/api/print/jobs/${job.id}/download/number-mapping.xlsx">Скачать Excel-сопоставление</a>`
+    : "";
   const html = `
     <a class="download primary-download" href="${primaryHref}">${primaryText}</a>
+    ${mappingLink}
     ${reportLink}
+    <button class="secondary" type="button" data-result-new-task>Создать новую задачу</button>
   `;
   els.resultBlock.innerHTML = html;
   els.downloadTitle.textContent = isExcel ? `Готово ${pdfCount} PDF` : singlePdfName;
-  els.downloadActions.innerHTML = html;
+  els.downloadActions.innerHTML = `<a class="download primary-download" href="${primaryHref}">${primaryText}</a>${mappingLink}`;
+  els.resultBlock.querySelector("[data-result-new-task]")?.addEventListener("click", () => els.newTaskButton.click());
   renderPartsList(job);
 }
 
@@ -2158,17 +2145,24 @@ function renderStampColumnChoice(file, columns) {
   const card = document.createElement("article");
   card.className = "issue-card";
   const options = columns
-    .map((column) => `<option value="${escapeAttr(column.column)}">${escapeHtml(column.column)} · ${column.count} значений · первый: ${escapeHtml(column.first)}</option>`)
+    .map((column) => `<option value="${escapeAttr(column.column)}">${escapeHtml(column.column)}</option>`)
     .join("");
   card.innerHTML = `
-    <strong>Выберите столбец с метками</strong>
-    <p>${escapeHtml(file.name)}</p>
+    <strong>Файл с номерами для нанесения: ${escapeHtml(file.name)}</strong>
+    <p data-stamp-column-summary></p>
     <select data-stamp-column-choice>${options}</select>
-    <button class="secondary" type="button" data-load-stamp-column>Загрузить выбранный столбец</button>
+    <button class="secondary" type="button" data-load-stamp-column>Загрузить номера</button>
   `;
   els.stampWarnings.append(card);
+  const select = card.querySelector("[data-stamp-column-choice]");
+  const renderChoiceSummary = () => {
+    const selected = columns.find((column) => String(column.column) === select.value) || columns[0];
+    card.querySelector("[data-stamp-column-summary]").textContent = `Столбец: ${selected.column} · Количество значений: ${selected.count} · Первый номер: ${selected.first || "—"}`;
+  };
+  select.addEventListener("change", renderChoiceSummary);
+  renderChoiceSummary();
   card.querySelector("[data-load-stamp-column]").addEventListener("click", async () => {
-    const column = card.querySelector("[data-stamp-column-choice]").value;
+    const column = select.value;
     const formData = new FormData();
     formData.append("file", file);
     formData.append("column", column);

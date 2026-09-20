@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Порядок печати DOCX</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/print/static/styles.css?v=20260919-pdf-enhancements" />
+    <link rel="stylesheet" href="/print/static/styles.css?v=20260920-ui-simplification" />
   </head>
   <body
     class="{% if embedded %}embedded{% endif %}"
@@ -66,7 +66,11 @@
           <div class="hero-copy">
             <p class="eyebrow">Шаг 1 из 4</p>
             <h2 id="documentsTitle">Подготовим документы к печати</h2>
-            <p>Соберите документы из файлов, ZIP и нескольких папок, затем загрузите их одной задачей.</p>
+            <ol class="step-hints">
+              <li>Добавьте файлы или папки</li>
+              <li>Проверьте количество найденных документов</li>
+              <li>Нажмите «Загрузить документы»</li>
+            </ol>
           </div>
           <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="Загрузить документы">
             <input id="fileInput" type="file" multiple accept=".docx,.zip,.xlsx" />
@@ -99,6 +103,7 @@
             <span id="uploadStatus" class="status-pill good">Документы загружены</span>
             <strong id="acceptedCount">0 DOCX</strong>
             <p id="excelCountText">Excel-файл не выбран</p>
+            <p class="next-step-hint">Документы загружены. Теперь выберите способ задания порядка на шаге 2.</p>
           </div>
           <button id="showFilesButton" class="secondary" type="button">Показать файлы</button>
         </div>
@@ -107,28 +112,28 @@
       <section id="orderScreen" class="screen" aria-labelledby="orderTitle" hidden>
         <div class="screen-head">
           <p class="eyebrow">Шаг 2 из 4</p>
-          <h2 id="orderTitle">Как задать порядок?</h2>
-          <p>Выберите один способ. TXT и Excel не смешиваются в одной сборке.</p>
+          <h2 id="orderTitle">Выберите способ формирования PDF</h2>
+          <p>Укажите, откуда брать порядок документов.</p>
         </div>
 
         <div id="modeSelector" class="mode-grid">
           <button id="textModeButton" class="mode-card" type="button" data-mode="text">
             <span class="mode-icon">☰</span>
             <strong>Один список</strong>
-            <span>Собрать один PDF по списку номеров</span>
-            <small>Подходит, если у вас TXT или список, который можно вставить вручную.</small>
+            <span>Один PDF по списку номеров.</span>
+            <small>Подходит, если у вас один TXT-список или номера вставлены вручную.</small>
           </button>
           <button id="excelModeButton" class="mode-card" type="button" data-mode="excel">
             <span class="mode-icon">▦</span>
             <strong>Таблица Excel</strong>
-            <span>Собрать отдельный PDF для каждого столбца</span>
-            <small>Подходит, если номера распределены по нескольким столбцам XLSX.</small>
+            <span>Несколько PDF по столбцам Excel.</span>
+            <small>Подходит, если номера уже распределены по столбцам.</small>
           </button>
           <button id="registrationModeButton" class="mode-card" type="button" data-mode="registration">
             <span class="mode-icon">№</span>
             <strong>Новые партии</strong>
-            <span>Создать партии и нанести номера</span>
-            <small>DOCX будут распределены по партиям, а нумерация продолжится от последнего объекта года.</small>
+            <span>Создание новых партий и автоматическая нумерация.</span>
+            <small>Используйте только если формируете новые партии.</small>
           </button>
         </div>
 
@@ -140,21 +145,25 @@
         <div id="textModePanel" class="mode-panel" hidden>
           <div class="panel-head">
             <div>
-              <h3>Укажите номера в нужном порядке</h3>
-              <p>Один номер в каждой строке. Документы будут собраны сверху вниз.</p>
+              <h3>Номера документов для сборки</h3>
+              <ol class="step-hints compact">
+                <li>Вставьте номера вручную или загрузите TXT</li>
+                <li>При необходимости нажмите «Сортировать»</li>
+                <li>Нажмите «Проверить порядок»</li>
+              </ol>
             </div>
             <div class="inline-actions">
               <label class="file-button secondary">
                 <input id="txtInput" type="file" multiple accept=".txt,text/plain" />
                 Загрузить TXT
               </label>
-              <button id="sortSequenceButton" class="secondary" type="button">Сортировать ↑</button>
+              <button id="sortSequenceButton" class="secondary" type="button" title="Пример: ее2 → ее10 → ее100">Сортировать</button>
               <button id="undoSortButton" class="secondary" type="button" hidden>Отменить сортировку</button>
               <button id="clearSequenceButton" class="secondary" type="button">Очистить</button>
             </div>
           </div>
           <div id="txtFilesSummary" class="file-summary" hidden></div>
-          <label class="field-label" for="sequenceInput">Список номеров</label>
+          <label class="field-label" for="sequenceInput">Номера документов для сборки</label>
           <textarea id="sequenceInput" rows="12" spellcheck="false" placeholder="ее5968&#10;ее6032&#10;нн2832"></textarea>
           <div id="orderValidationNotice" class="order-validation-notice" hidden>
             <div>
@@ -172,7 +181,7 @@
         <div id="excelModePanel" class="mode-panel" hidden>
           <div class="panel-head">
             <div>
-              <h3>Выберите таблицу Excel</h3>
+              <h3>1. Загрузите Excel-файл с порядком</h3>
               <p>Для каждого непустого столбца будет создан отдельный PDF.</p>
             </div>
             <label class="file-button">
@@ -262,38 +271,40 @@
           <label class="toggle-row">
             <input id="stampEnabledInput" type="checkbox" />
             <span>
-              <strong id="stampPanelTitle">Нанести номера на документы</strong>
-              <small id="stampPanelSubtitle">Готовые метки будут нанесены построчно, без генерации и сортировки.</small>
+              <strong id="stampPanelTitle">Нанести номера на документы (необязательно)</strong>
+              <small id="stampPanelSubtitle">Готовые номера будут нанесены на документы по строкам, в указанном порядке.</small>
             </span>
           </label>
 
           <div id="stampControls" class="stamp-controls" hidden>
             <div class="panel-head">
               <div>
-                <h3 id="stampControlsTitle">Номера на документах</h3>
-                <p id="stampControlsSubtitle">Добавьте готовый список в том же порядке, что и документы. Одна строка — один документ.</p>
+                <h3 id="stampControlsTitle">Номера для нанесения на документы</h3>
+                <p id="stampControlsSubtitle">Загрузите или вставьте номера, которые нужно напечатать на каждом документе. Один номер — одна строка. Порядок строк должен совпадать с порядком документов.</p>
               </div>
               <div id="stampSourceActions" class="inline-actions">
                 <label class="file-button secondary">
                   <input id="stampTxtInput" type="file" accept=".txt,text/plain" />
-                  Загрузить TXT
+                  Загрузить TXT с метками
                 </label>
                 <label class="file-button secondary">
                   <input id="stampXlsxInput" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
-                  Загрузить Excel
+                  Загрузить Excel с метками
                 </label>
-                <button id="clearStampButton" class="secondary" type="button">Очистить</button>
+                <button id="clearStampButton" class="secondary" type="button">Очистить метки</button>
               </div>
             </div>
 
             <div id="stampTextBlock">
-              <label class="field-label" for="stampTextInput">Список меток</label>
+              <label class="field-label" for="stampTextInput">Номера для нанесения</label>
               <textarea id="stampTextInput" rows="8" spellcheck="false" placeholder="6528-2026&#10;6529-2026&#10;6531-2026"></textarea>
             </div>
 
             <div id="stampExcelGroups" class="stamp-groups" hidden></div>
 
-            <div class="stamp-options">
+            <details class="advanced-settings">
+              <summary>Дополнительные настройки нанесения</summary>
+              <div class="stamp-options">
               <label id="stampRejectDuplicatesRow"><input id="stampRejectDuplicatesInput" type="checkbox" /> Считать повторяющиеся метки ошибкой</label>
               <label id="stampAllowSkipRow"><input id="stampAllowSkipInput" type="checkbox" /> Разрешить SKIP</label>
               <label>
@@ -318,7 +329,8 @@
               <label><input id="stampBoldInput" type="checkbox" /> Жирный</label>
               <label><input id="stampBackgroundInput" type="checkbox" /> Белый фон</label>
               <label><input id="stampBorderInput" type="checkbox" /> Рамка</label>
-            </div>
+              </div>
+            </details>
 
             <div class="input-footer">
               <span id="stampSummary">Документов: 0 · Меток: 0</span>
@@ -339,7 +351,7 @@
       <section id="checkScreen" class="screen" aria-labelledby="checkTitle" hidden>
         <div class="screen-head">
           <p class="eyebrow">Шаг 3 из 4</p>
-          <h2 id="checkTitle">Можно собирать PDF?</h2>
+          <h2 id="checkTitle">Проверка завершена</h2>
           <p id="checkSubtitle">После проверки здесь появятся найденные документы и ошибки.</p>
         </div>
 
@@ -363,19 +375,22 @@
       <section id="resultScreen" class="screen" aria-labelledby="resultTitle" hidden>
         <div id="progressPanel" class="progress-panel" hidden>
           <p class="eyebrow">Шаг 4 из 4</p>
-          <h2>Собираем PDF</h2>
+          <h2>Идёт сборка PDF</h2>
           <p>Можно закрыть вкладку — задача продолжит выполняться на сервере.</p>
           <div class="progress-meter" aria-hidden="true">
             <div id="progressBar"></div>
           </div>
           <div id="progressText" class="progress-text" aria-live="polite">Запускаем сборку…</div>
           <div id="progressDetails" class="progress-details"></div>
-          <ol class="process-steps" aria-label="Этапы сборки">
-            <li id="pipelineCheck" class="done">Проверка файлов</li>
-            <li id="pipelineConvert" class="active">Преобразование документов</li>
-            <li id="pipelineMerge">Сборка итогового PDF</li>
-            <li id="pipelineDownload">Подготовка скачивания</li>
-          </ol>
+          <details class="build-details">
+            <summary>Показать подробности</summary>
+            <ol class="process-steps" aria-label="Этапы сборки">
+              <li id="pipelineCheck" class="done">Проверка файлов</li>
+              <li id="pipelineConvert" class="active">Преобразование документов</li>
+              <li id="pipelineMerge">Сборка итогового PDF</li>
+              <li id="pipelineDownload">Подготовка скачивания</li>
+            </ol>
+          </details>
         </div>
 
         <div id="resultPanel" class="result-panel" hidden>
@@ -429,6 +444,6 @@
       </form>
     </dialog>
 
-    <script src="/print/static/app.js?v=20260919-pdf-enhancements"></script>
+    <script src="/print/static/app.js?v=20260920-ui-simplification"></script>
   </body>
 </html>

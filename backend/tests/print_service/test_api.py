@@ -7,11 +7,12 @@ import fitz
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from pypdf import PdfWriter
 
 from app.print_service import main
 from app.print_service.services.job_store import get_job_dir, save_state
+from app.print_service.services.report_service import write_number_mapping_xlsx
 
 
 @pytest.fixture()
@@ -123,6 +124,9 @@ def test_full_success_flow_with_mocked_conversion(client, monkeypatch):
     report = (get_job_dir(job_id) / state["report_csv"]).read_text(encoding="utf-8-sig")
     assert "1-(ее5968).pdf" in report
     assert client.get(f"/api/print/jobs/{job_id}/download/report.csv").status_code == 200
+    mapping_download = client.get(f"/api/print/jobs/{job_id}/download/number-mapping.xlsx")
+    assert mapping_download.status_code == 200
+    assert "%D0%A1%D0%BE%D0%BF%D0%BE%D1%81%D1%82%D0%B0%D0%B2%D0%BB%D0%B5%D0%BD%D0%B8%D0%B5" in mapping_download.headers["content-disposition"]
     assert client.delete(f"/api/print/jobs/{job_id}").status_code == 200
 
 
@@ -199,6 +203,7 @@ def test_registration_build_creates_party_named_pdfs(client, monkeypatch):
     zip_path = main.get_job_dir(job_id) / state["result_zip"]
     with ZipFile(zip_path) as archive:
         assert "1-(ии8828-ии6305).pdf" in archive.namelist()
+        assert "Сопоставление номеров.xlsx" in archive.namelist()
         assert "report.csv" not in archive.namelist()
     assert state["report_csv"] is None
 
@@ -290,7 +295,12 @@ def test_excel_build_uses_range_names_in_files_zip_and_report(client, monkeypatc
     ]
     state = main.load_state(job_id)
     with ZipFile(main.get_job_dir(job_id) / state["result_zip"]) as archive:
-        assert set(archive.namelist()) == {"1-(ее5968).pdf", "2-(ее6032).pdf", "report.csv"}
+        assert set(archive.namelist()) == {
+            "1-(ее5968).pdf",
+            "2-(ее6032).pdf",
+            "report.csv",
+            "Сопоставление номеров.xlsx",
+        }
     report = (main.get_job_dir(job_id) / state["report_csv"]).read_text(encoding="utf-8-sig")
     assert "1-(ее5968).pdf" in report
     assert "2-(ее6032).pdf" in report
@@ -307,6 +317,27 @@ def test_excel_build_uses_range_names_in_files_zip_and_report(client, monkeypatc
 )
 def test_result_pdf_name_uses_actual_entry_order(index, entries, expected):
     assert main._result_pdf_name(index, entries) == expected
+
+
+def test_number_mapping_xlsx_preserves_final_pdf_order(tmp_path):
+    path = tmp_path / "mapping.xlsx"
+    entries = [
+        {"number": "ии10", "stamp_label": "7701-2026"},
+        {"number": "ии2", "stamp_label": "7700-2026"},
+        {"number": "ии100", "stamp_label": "7702-2026"},
+    ]
+
+    assert write_number_mapping_xlsx(entries, path) == 3
+
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    rows = list(workbook.active.iter_rows(values_only=True))
+    workbook.close()
+    assert rows == [
+        ("Исходный номер", "Присвоенный номер"),
+        ("ии10", "7701-2026"),
+        ("ии2", "7700-2026"),
+        ("ии100", "7702-2026"),
+    ]
 
 
 def test_upload_keeps_safe_relative_folder_path(client):
@@ -377,6 +408,9 @@ def test_full_success_flow_with_stamping(client, monkeypatch):
     report = (get_job_dir(job_id) / state["report_csv"]).read_text(encoding="utf-8-sig")
     assert "Наносимая метка" in report
     assert "6528-2026" in report
+    workbook = load_workbook(get_job_dir(job_id) / state["number_mapping_xlsx"], read_only=True, data_only=True)
+    assert list(workbook.active.iter_rows(values_only=True))[1] == ("ее5968", "6528-2026")
+    workbook.close()
 
 
 def test_stamping_count_mismatch_blocks_build(client):

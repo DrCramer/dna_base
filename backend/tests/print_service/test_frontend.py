@@ -38,7 +38,11 @@ def test_homepage_uses_redesigned_step_flow(tmp_path, monkeypatch):
     assert "Добавить папку" in html
     assert "webkitdirectory" in html
     assert 'id="txtInput" type="file" multiple' in html
-    assert "Сортировать ↑" in html
+    assert ">Сортировать<" in html
+    assert "Выберите способ формирования PDF" in html
+    assert "Номера документов для сборки" in html
+    assert "Дополнительные настройки нанесения" in html
+    assert "Показать подробности" in html
     assert "Выбрать DOCX или ZIP" not in html
     assert "Предварительный просмотр" not in html
 
@@ -130,3 +134,15 @@ def test_text_validation_waits_for_stamp_validation_when_enabled():
     assert 'setStep("order")' in validate_function
     assert 'setStep("check")' in validate_function
     assert "if (data.can_build)" in text.split("async function applyStampingToCurrentValidation", 1)[1]
+
+
+def test_frontend_uses_simplified_validation_and_mapping_download():
+    text = APP_JS.read_text(encoding="utf-8")
+
+    assert "PDF будет создано" in text
+    assert "Только ошибки" in text
+    assert "Только готовые" in text
+    assert '"warnings", `Предупреждения' not in text
+    assert "Оцениваем оставшееся время" not in text
+    assert "/download/number-mapping.xlsx" in text
+    assert "Скачать Excel-сопоставление" in text

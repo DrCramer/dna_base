@@ -36,7 +36,7 @@ from app.print_service.services.job_store import (
 )
 from app.print_service.services.matching_service import match_documents
 from app.print_service.services.pdf_service import PdfValidationError, merge_pdfs
-from app.print_service.services.report_service import write_csv_report
+from app.print_service.services.report_service import write_csv_report, write_number_mapping_xlsx
 from app.print_service.services.stamping_service import (
     StampingValidationError,
     apply_stamping_to_validation,
@@ -181,6 +181,18 @@ def _registration_payload_with_job_numbers(state: dict, payload: AutoRegistratio
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 BUILD_TASKS: dict[str, asyncio.Task] = {}
+NUMBER_MAPPING_DOWNLOAD_NAME = "Сопоставление номеров.xlsx"
+
+
+def _write_number_mapping(job_dir: Path, entries: list[dict]) -> dict:
+    path = job_dir / "result" / "number-mapping.xlsx"
+    rows = write_number_mapping_xlsx(entries, path)
+    return {
+        "path": str(path.relative_to(job_dir)),
+        "download_name": NUMBER_MAPPING_DOWNLOAD_NAME,
+        "rows": rows,
+        "size_bytes": path.stat().st_size,
+    }
 
 
 @asynccontextmanager
@@ -389,6 +401,7 @@ async def validate_job(job_id: str, payload: SequencePayload):
     state["result_pdf_download_name"] = None
     state["result_zip"] = None
     state["result_zip_download_name"] = None
+    state["number_mapping_xlsx"] = None
     state["report_csv"] = None
     save_state(job_id, state)
     report = {"job_id": job_id, "validation": validation, "build": None}
@@ -438,6 +451,7 @@ async def validate_excel_job(
     state["result_pdf_download_name"] = None
     state["result_zip"] = None
     state["result_zip_download_name"] = None
+    state["number_mapping_xlsx"] = None
     state["report_csv"] = None
     save_state(job_id, state)
     flat_entries = [
@@ -488,6 +502,7 @@ async def apply_registration_to_job(
     state["result_pdf_download_name"] = None
     state["result_zip"] = None
     state["result_zip_download_name"] = None
+    state["number_mapping_xlsx"] = None
     state["report_csv"] = "result/report.csv"
     state["error"] = None
     save_state(job_id, state)
@@ -625,12 +640,14 @@ async def _run_build_job(job_id: str):
         merge = merge_pdfs(stamped_paths, output_pdf)
         report_csv = job_dir / "result" / "report.csv"
         write_csv_report(converted_entries, report_csv)
+        mapping = _write_number_mapping(job_dir, converted_entries)
         state["validation"]["entries"] = converted_entries
         state["build"] = {
             "progress": "ready",
             "warnings": build_warnings,
             "merge": merge,
             "stamping": stamp_summary,
+            "number_mapping": mapping,
             "result_pdfs": [
                 {
                     "title": download_name,
@@ -650,6 +667,7 @@ async def _run_build_job(job_id: str):
         state["result_pdf_download_name"] = download_name
         state["result_zip"] = None
         state["result_zip_download_name"] = None
+        state["number_mapping_xlsx"] = mapping["path"]
         state["report_csv"] = "result/report.csv"
         state["status"] = "ready"
         state["error"] = None
@@ -757,11 +775,13 @@ async def _build_registration_job(job_id: str, state: dict):
             converted_all.extend(converted_entries)
             completed += len(converted_entries)
 
+        mapping = _write_number_mapping(job_dir, converted_all)
         zip_download_name = _result_zip_name(result_pdfs)
         zip_path = job_dir / "result" / zip_download_name
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for pdf in result_pdfs:
                 archive.write(job_dir / pdf["path"], arcname=pdf["download_name"])
+            archive.write(job_dir / mapping["path"], arcname=mapping["download_name"])
 
         state["validation"]["entries"] = converted_all
         state["build"] = {
@@ -769,6 +789,7 @@ async def _build_registration_job(job_id: str, state: dict):
             "mode": "registration",
             "warnings": build_warnings,
             "result_pdfs": result_pdfs,
+            "number_mapping": mapping,
             "stamping": {
                 "enabled": bool(validation.get("stamping", {}).get("config", {}).get("enabled")),
                 "applied": sum(pdf["stamping"]["applied"] for pdf in result_pdfs),
@@ -788,6 +809,7 @@ async def _build_registration_job(job_id: str, state: dict):
         state["result_pdf_download_name"] = None
         state["result_zip"] = str(zip_path.relative_to(job_dir))
         state["result_zip_download_name"] = zip_download_name
+        state["number_mapping_xlsx"] = mapping["path"]
         state["report_csv"] = None
         state["status"] = "ready"
         state["error"] = None
@@ -916,6 +938,7 @@ async def _build_excel_job(job_id: str, state: dict):
                 total_groups=total_groups,
             )
 
+        mapping = _write_number_mapping(job_dir, all_entries)
         zip_download_name = _result_zip_name(result_pdfs)
         zip_path = job_dir / "result" / zip_download_name
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -924,6 +947,7 @@ async def _build_excel_job(job_id: str, state: dict):
             report_path = job_dir / "result" / "report.csv"
             write_csv_report(all_entries, report_path)
             archive.write(report_path, arcname="report.csv")
+            archive.write(job_dir / mapping["path"], arcname=mapping["download_name"])
 
         state["validation"]["groups"] = updated_groups
         state["build"] = {
@@ -931,6 +955,7 @@ async def _build_excel_job(job_id: str, state: dict):
             "mode": "excel",
             "warnings": build_warnings,
             "result_pdfs": result_pdfs,
+            "number_mapping": mapping,
             "stamping": {
                 "enabled": bool(validation.get("stamping", {}).get("config", {}).get("enabled")),
                 "applied": sum(pdf["stamping"]["applied"] for pdf in result_pdfs),
@@ -950,6 +975,7 @@ async def _build_excel_job(job_id: str, state: dict):
         state["result_pdf_download_name"] = None
         state["result_zip"] = str(zip_path.relative_to(job_dir))
         state["result_zip_download_name"] = zip_download_name
+        state["number_mapping_xlsx"] = mapping["path"]
         state["report_csv"] = "result/report.csv"
         state["status"] = "ready"
         state["error"] = None
@@ -992,6 +1018,7 @@ async def update_stamping(job_id: str, payload: StampingPayload):
     state["result_pdf_download_name"] = None
     state["result_zip"] = None
     state["result_zip_download_name"] = None
+    state["number_mapping_xlsx"] = None
     save_state(job_id, state)
     if validation.get("mode") == "excel":
         flat_entries = [
@@ -1106,6 +1133,21 @@ async def download_report(job_id: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="Отчёт не найден")
     return FileResponse(path, media_type="text/csv; charset=utf-8", filename=f"docx-print-order-{job_id}.csv")
+
+
+@api_router.get("/jobs/{job_id}/download/number-mapping.xlsx")
+async def download_number_mapping(job_id: str):
+    state = _load_state_or_404(job_id)
+    if not state.get("number_mapping_xlsx"):
+        raise HTTPException(status_code=404, detail="Таблица сопоставления ещё не создана")
+    path = get_job_dir(job_id) / state["number_mapping_xlsx"]
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Таблица сопоставления не найдена")
+    return FileResponse(
+        path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=NUMBER_MAPPING_DOWNLOAD_NAME,
+    )
 
 
 @api_router.delete("/jobs/{job_id}")

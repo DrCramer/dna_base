@@ -33,6 +33,7 @@ def create_job() -> dict[str, Any]:
         "build": None,
         "stamping": None,
         "result_pdf": None,
+        "number_mapping_xlsx": None,
         "report_csv": None,
         "error": None,
     }
