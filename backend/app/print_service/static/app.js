@@ -53,6 +53,7 @@ const state = {
   txtFiles: [],
   sequenceBeforeSort: null,
   sequenceInternalUpdate: false,
+  stampSourceMode: "auto_sequence",
 };
 
 const els = {
@@ -142,6 +143,13 @@ const els = {
   stampControlsTitle: document.querySelector("#stampControlsTitle"),
   stampControlsSubtitle: document.querySelector("#stampControlsSubtitle"),
   stampSourceActions: document.querySelector("#stampSourceActions"),
+  stampAutoBlock: document.querySelector("#stampAutoBlock"),
+  stampManualBlock: document.querySelector("#stampManualBlock"),
+  stampStartNumberInput: document.querySelector("#stampStartNumberInput"),
+  showGeneratedNumbersButton: document.querySelector("#showGeneratedNumbersButton"),
+  useManualStampButton: document.querySelector("#useManualStampButton"),
+  useAutoStampButton: document.querySelector("#useAutoStampButton"),
+  stampGeneratedPreview: document.querySelector("#stampGeneratedPreview"),
   stampTxtInput: document.querySelector("#stampTxtInput"),
   stampXlsxInput: document.querySelector("#stampXlsxInput"),
   clearStampButton: document.querySelector("#clearStampButton"),
@@ -234,7 +242,10 @@ function forgetLocalTask() {
   state.resultLimit = 160;
   state.expandedGroups.clear();
   state.stampingHydratedForJob = null;
-  els.stampEnabledInput.checked = false;
+  state.stampSourceMode = "auto_sequence";
+  els.stampEnabledInput.checked = true;
+  els.stampBorderInput.checked = true;
+  els.stampStartNumberInput.value = "";
   els.stampTextInput.value = "";
   els.orderValidationNotice.hidden = true;
   els.sequenceInput.value = "";
@@ -616,6 +627,8 @@ function hydrateStampingUi(validation) {
   if (!config || state.stampingHydratedForJob === `${state.jobId}:${validation.mode}`) return;
   state.stampingHydratedForJob = `${state.jobId}:${validation.mode}`;
   els.stampEnabledInput.checked = Boolean(config.enabled);
+  state.stampSourceMode = config.source === "manual" ? "manual" : "auto_sequence";
+  els.stampStartNumberInput.value = config.start_number || "";
   els.stampTextInput.value = config.text || "";
   els.stampRejectDuplicatesInput.checked = Boolean(config.reject_duplicates);
   els.stampAllowSkipInput.checked = Boolean(config.allow_skip);
@@ -627,7 +640,7 @@ function hydrateStampingUi(validation) {
   els.stampFontSizeInput.value = style.font_size ?? 12;
   els.stampBoldInput.checked = Boolean(style.bold);
   els.stampBackgroundInput.checked = Boolean(style.white_background);
-  els.stampBorderInput.checked = Boolean(style.border);
+  els.stampBorderInput.checked = style.border !== false;
 }
 
 function renderStampingPanel() {
@@ -636,22 +649,25 @@ function renderStampingPanel() {
     els.stampEnabledInput.checked = true;
   }
   els.stampEnabledInput.disabled = isRegistration;
-  els.stampPanelTitle.textContent = isRegistration ? "Нанести № постановления на документы" : "Нанести номера на документы (необязательно)";
+  els.stampPanelTitle.textContent = isRegistration ? "Нанести № постановления на документы" : "Нанести номера на документы";
   els.stampPanelSubtitle.textContent = isRegistration
     ? "Номера формируются из создаваемой регистрации, здесь настраивается только внешний вид нанесения."
-    : "Готовые номера будут нанесены на документы по строкам, в указанном порядке.";
-  els.stampControlsTitle.textContent = isRegistration ? "Настройки нанесения" : "Номера для нанесения на документы";
+    : "Укажите начальный номер, остальные будут рассчитаны по порядку документов.";
+  els.stampControlsTitle.textContent = isRegistration ? "Настройки нанесения" : "Нумерация документов";
   els.stampControlsSubtitle.textContent = isRegistration
     ? "Выберите угол, поворот, отступы, размер шрифта, фон и рамку для системного номера."
-    : "Загрузите или вставьте номера, которые нужно напечатать на каждом документе. Один номер — одна строка. Порядок строк должен совпадать с порядком документов.";
+    : "Количество и диапазон будут рассчитаны после проверки порядка.";
   const enabled = isRegistration || els.stampEnabledInput.checked;
   els.stampControls.hidden = !enabled;
+  const manualSource = state.stampSourceMode === "manual";
+  els.stampAutoBlock.hidden = isRegistration || manualSource;
+  els.stampManualBlock.hidden = isRegistration || !manualSource;
   els.stampSourceActions.hidden = isRegistration;
   els.stampTextBlock.hidden = isRegistration || state.mode === "excel";
   els.stampRejectDuplicatesRow.hidden = isRegistration;
   els.stampAllowSkipRow.hidden = isRegistration;
   els.stampValidationActions.hidden = isRegistration;
-  const showExcelGroups = state.mode === "excel" && Boolean(state.lastValidation?.groups?.length);
+  const showExcelGroups = manualSource && state.mode === "excel" && Boolean(state.lastValidation?.groups?.length);
   els.stampExcelGroups.hidden = !showExcelGroups;
   if (showExcelGroups) renderStampGroupInputs();
   saveStampUiSettings();
@@ -682,7 +698,10 @@ function renderStampGroupInputs() {
     els.stampExcelGroups.append(card);
   });
   els.stampExcelGroups.querySelectorAll("[data-stamp-group-text]").forEach((node) => {
-    node.addEventListener("input", updateStampSummary);
+    node.addEventListener("input", () => {
+      markStampAssignmentDirty();
+      updateStampSummary();
+    });
   });
 }
 
@@ -1056,7 +1075,8 @@ function collectStampingConfig() {
   });
   return {
     enabled: state.mode === "registration" || els.stampEnabledInput.checked,
-    source: state.mode === "registration" ? "registration" : "manual",
+    source: state.mode === "registration" ? "registration" : state.stampSourceMode,
+    start_number: state.mode === "registration" ? "" : els.stampStartNumberInput.value.trim(),
     text: state.mode === "registration" ? "" : els.stampTextInput.value,
     groups: state.mode === "registration" ? {} : groups,
     reject_duplicates: state.mode === "registration" ? false : els.stampRejectDuplicatesInput.checked,
@@ -1076,8 +1096,11 @@ function collectStampingConfig() {
 
 function collectExcelValidationStampingConfig() {
   const config = collectStampingConfig();
+  if (config.enabled && config.source === "auto_sequence" && !state.lastValidation?.groups?.length) {
+    return { ...config, enabled: false };
+  }
   const hasGroupLabels = Object.values(config.groups).some((group) => labelLines(group.text || "").length > 0);
-  if (config.enabled && !hasGroupLabels) {
+  if (config.enabled && config.source === "manual" && !hasGroupLabels) {
     return { ...config, enabled: false };
   }
   return config;
@@ -1086,6 +1109,34 @@ function collectExcelValidationStampingConfig() {
 function collectTextValidationStampingConfig() {
   const config = collectStampingConfig();
   return config.enabled ? { ...config, enabled: false } : config;
+}
+
+function generatedStampLabels(count) {
+  const match = els.stampStartNumberInput.value.trim().match(/^(\d+)-(\d{4})$/);
+  if (!match) return null;
+  const width = match[1].length;
+  const start = Number(match[1]);
+  return Array.from({ length: Math.max(0, count) }, (_, index) => (
+    `${String(start + index).padStart(width, "0")}-${match[2]}`
+  ));
+}
+
+function setStampSourceMode(source) {
+  state.stampSourceMode = source === "manual" ? "manual" : "auto_sequence";
+  els.stampGeneratedPreview.hidden = true;
+  els.showGeneratedNumbersButton.textContent = "Показать список";
+  markStampAssignmentDirty();
+  renderStampingPanel();
+}
+
+function markStampAssignmentDirty() {
+  if (!state.lastValidation || state.mode === "registration") return;
+  state.canBuild = false;
+  els.buildButton.disabled = true;
+  els.orderValidationNotice.hidden = false;
+  els.orderValidationNotice.classList.remove("has-errors");
+  els.orderValidationTitle.textContent = "Нумерация изменена";
+  els.orderValidationText.textContent = "Присвоенные номера будут пересчитаны после повторной проверки.";
 }
 
 function updateStampSummary() {
@@ -1110,6 +1161,33 @@ function updateStampSummary() {
   }
   const documents = stampDocumentCount();
   const labels = stampLabelCount();
+  if (state.stampSourceMode === "auto_sequence") {
+    const sequence = generatedStampLabels(documents);
+    const hasValidatedOrder = Boolean(state.lastValidation);
+    if (!els.stampStartNumberInput.value.trim()) {
+      els.stampSummary.textContent = hasValidatedOrder
+        ? `Документов: ${documents} · Укажите начальный номер`
+        : "Сначала проверьте порядок документов и укажите начальный номер";
+    } else if (!sequence) {
+      els.stampSummary.textContent = "Укажите начальный номер в формате 7658-2026.";
+    } else if (!hasValidatedOrder) {
+      els.stampSummary.textContent = "Сначала проверьте порядок документов. После проверки номера будут рассчитаны автоматически.";
+    } else {
+      els.stampSummary.textContent = `Будет создано: ${sequence.length} · Первый: ${sequence[0] || "—"} · Последний: ${sequence.at(-1) || "—"}`;
+    }
+    els.applyStampingButton.disabled = !hasValidatedOrder || !sequence;
+    els.stampPreviewButton.disabled = !canShowStampPreview(documents, labels);
+    els.showGeneratedNumbersButton.disabled = !hasValidatedOrder || !sequence;
+    if (!els.stampGeneratedPreview.hidden) {
+      els.stampGeneratedPreview.textContent = sequence?.join("\n") || "";
+    }
+    els.stampWarnings.innerHTML = "";
+    if (els.stampBackgroundInput.checked) {
+      els.stampWarnings.append(createIssueCard("Белый фон может закрыть часть исходного документа", "", "", "warning"));
+    }
+    saveStampUiSettings();
+    return;
+  }
   const diff = documents - labels;
   const duplicates = stampDuplicateCount();
   const skipCount = stampSkipCount();
@@ -1147,6 +1225,9 @@ function stampDocumentCount() {
 }
 
 function stampLabelCount() {
+  if (state.stampSourceMode === "auto_sequence") {
+    return generatedStampLabels(stampDocumentCount())?.length || 0;
+  }
   if (state.mode === "excel" && state.lastValidation?.groups?.length) {
     return [...els.stampExcelGroups.querySelectorAll("[data-stamp-group-text]")].reduce(
       (sum, node) => sum + labelLines(node.value).length,
@@ -1169,6 +1250,9 @@ function stampSkipCount() {
 }
 
 function stampAllLabels() {
+  if (state.stampSourceMode === "auto_sequence") {
+    return generatedStampLabels(stampDocumentCount()) || [];
+  }
   if (state.mode === "excel" && state.lastValidation?.groups?.length) {
     return [...els.stampExcelGroups.querySelectorAll("[data-stamp-group-text]")].flatMap((node) => labelLines(node.value));
   }
@@ -1187,7 +1271,8 @@ function saveStampUiSettings() {
 function restoreStampUiSettings() {
   try {
     const safe = JSON.parse(localStorage.getItem(STORAGE.stampUi) || "{}");
-    els.stampEnabledInput.checked = false;
+    els.stampEnabledInput.checked = true;
+    state.stampSourceMode = "auto_sequence";
     els.stampRejectDuplicatesInput.checked = Boolean(safe.reject_duplicates);
     els.stampAllowSkipInput.checked = Boolean(safe.allow_skip);
     const style = safe.style || {};
@@ -1198,7 +1283,7 @@ function restoreStampUiSettings() {
     els.stampFontSizeInput.value = style.font_size ?? 12;
     els.stampBoldInput.checked = Boolean(style.bold);
     els.stampBackgroundInput.checked = Boolean(style.white_background);
-    els.stampBorderInput.checked = Boolean(style.border);
+    els.stampBorderInput.checked = true;
   } catch {
     // UI settings are optional.
   }
@@ -1206,11 +1291,7 @@ function restoreStampUiSettings() {
 
 function updateSequenceCount() {
   const info = getSequenceInfo();
-  if (info.hasDuplicates) {
-    els.sequenceCount.textContent = `${info.total} ${plural(info.total, "строка", "строки", "строк")} · ${info.unique} уникальных · найден повтор`;
-  } else {
-    els.sequenceCount.textContent = `${info.total} ${plural(info.total, "номер", "номера", "номеров")}`;
-  }
+  els.sequenceCount.textContent = `${info.total} ${plural(info.total, "номер", "номера", "номеров")}`;
   els.validateButton.disabled = !state.jobId || state.mode !== "text" || info.total === 0;
   localStorage.setItem(STORAGE.sequence, els.sequenceInput.value);
   updateStampSummary();
@@ -1218,10 +1299,16 @@ function updateSequenceCount() {
 
 function invalidateTextValidation() {
   if (state.mode !== "text" || !state.lastValidation) return;
+  const assignedNumbersInvalidated = els.stampEnabledInput.checked;
   state.lastValidation = null;
   state.canBuild = false;
   state.lastJob = { ...(state.lastJob || {}), status: "uploaded", validation: null, build: null };
-  els.orderValidationNotice.hidden = true;
+  els.orderValidationNotice.hidden = !assignedNumbersInvalidated;
+  if (assignedNumbersInvalidated) {
+    els.orderValidationNotice.classList.remove("has-errors");
+    els.orderValidationTitle.textContent = "Порядок изменён";
+    els.orderValidationText.textContent = "Присвоенные номера будут пересчитаны после повторной проверки порядка.";
+  }
   persistState();
   updateStepper();
 }
@@ -1233,7 +1320,7 @@ function renderOrderValidationNotice(validation) {
   els.orderValidationTitle.textContent = stats.errors ? "Порядок проверен, есть ошибки" : "✓ Порядок проверен";
   els.orderValidationText.textContent = stats.errors
     ? `Найдено документов: ${stats.matched} из ${stats.total} · ошибок: ${stats.errors}. Исправьте порядок или откройте подробности.`
-    : `Найдено документов: ${stats.matched} из ${stats.total} · ошибок: 0. Теперь заполните номера для нанесения и нажмите «Проверить метки».`;
+    : `Найдено документов: ${stats.matched} из ${stats.total} · ошибок: 0. Теперь укажите начальный номер и нажмите «Проверить номера».`;
 }
 
 async function validateTextJob() {
@@ -1383,7 +1470,7 @@ async function showStampPreview() {
       });
       const blob = await readPreviewBlob(response);
       const number = getSequenceInfo().rows[0] || "первый документ";
-      const label = labelLines(els.stampTextInput.value)[0] || "";
+      const label = stampAllLabels()[0] || "";
       setStampPreviewImage(blob, label ? `Документ: ${number} · Метка: ${label}` : "Пример нанесения метки");
       showToast("Пример обновлён");
       return;
@@ -1439,6 +1526,8 @@ function renderValidation(validation) {
     <div class="metric-grid">
       <div class="metric"><span>Документов</span><strong>${stats.matched}</strong></div>
       <div class="metric"><span>PDF будет создано</span><strong>${stats.pdfCount}</strong></div>
+      <div class="metric"><span>Присвоено номеров</span><strong>${stats.assignedCount}</strong></div>
+      <div class="metric"><span>Диапазон</span><strong>${escapeHtml(stats.assignedCount ? `${stats.assignedFirst} — ${stats.assignedLast}` : "—")}</strong></div>
       <div class="metric"><span>Ошибок</span><strong>${stats.errors}</strong></div>
       <div class="metric"><span>Предупреждений</span><strong>${stats.warnings}</strong></div>
     </div>
@@ -1464,6 +1553,9 @@ function getValidationStats(validation) {
   const matched = entries.filter((entry) => entry.doc_id).length;
   const topWarnings = validation.warnings?.length || 0;
   const stampSummary = validation.stamping?.summary || {};
+  const assigned = entries
+    .map((entry) => entry.assigned_number || entry.stamp_label || "")
+    .filter(Boolean);
   return {
     entries,
     total: entries.length,
@@ -1480,6 +1572,9 @@ function getValidationStats(validation) {
     stampLabels: stampSummary.labels || 0,
     stampApplied: stampSummary.applied || 0,
     stampSkipped: stampSummary.skipped || 0,
+    assignedCount: assigned.length,
+    assignedFirst: assigned[0] || "",
+    assignedLast: assigned.at(-1) || "",
   };
 }
 
@@ -2183,6 +2278,7 @@ function renderStampColumnChoice(file, columns) {
     } else {
       els.stampTextInput.value = text;
     }
+    markStampAssignmentDirty();
     showToast(`Загружен столбец ${column}: ${data.labels?.length || 0} значений`);
     updateStampSummary();
   });
@@ -2424,7 +2520,21 @@ els.validateButton.addEventListener("click", validateTextJob);
 els.viewOrderValidationButton.addEventListener("click", () => setStep("check"));
 
 els.stampEnabledInput.addEventListener("change", renderStampingPanel);
-els.stampTextInput.addEventListener("input", updateStampSummary);
+els.stampTextInput.addEventListener("input", () => {
+  markStampAssignmentDirty();
+  updateStampSummary();
+});
+els.stampStartNumberInput.addEventListener("input", () => {
+  markStampAssignmentDirty();
+  updateStampSummary();
+});
+els.useManualStampButton.addEventListener("click", () => setStampSourceMode("manual"));
+els.useAutoStampButton.addEventListener("click", () => setStampSourceMode("auto_sequence"));
+els.showGeneratedNumbersButton.addEventListener("click", () => {
+  els.stampGeneratedPreview.hidden = !els.stampGeneratedPreview.hidden;
+  els.showGeneratedNumbersButton.textContent = els.stampGeneratedPreview.hidden ? "Показать список" : "Скрыть список";
+  updateStampSummary();
+});
 els.stampRejectDuplicatesInput.addEventListener("change", updateStampSummary);
 els.stampAllowSkipInput.addEventListener("change", updateStampSummary);
 [
@@ -2441,6 +2551,7 @@ els.stampTxtInput.addEventListener("change", async () => {
   const file = els.stampTxtInput.files[0];
   if (!file) return;
   els.stampTextInput.value = await file.text();
+  markStampAssignmentDirty();
   updateStampSummary();
   showToast("Список меток TXT загружен");
 });
@@ -2450,6 +2561,7 @@ els.clearStampButton.addEventListener("click", () => {
   els.stampExcelGroups.querySelectorAll("[data-stamp-group-text]").forEach((node) => {
     node.value = "";
   });
+  markStampAssignmentDirty();
   updateStampSummary();
 });
 els.applyStampingButton.addEventListener("click", applyStampingToCurrentValidation);

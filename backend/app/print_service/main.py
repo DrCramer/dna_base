@@ -151,7 +151,11 @@ def _has_excel_stamping_labels(config: dict) -> bool:
 
 def _parse_excel_stamping_json(raw: str | None) -> dict:
     config = _parse_stamping_json(raw)
-    if config.get("enabled") and not _has_excel_stamping_labels(config):
+    if (
+        config.get("enabled")
+        and config.get("source") != "auto_sequence"
+        and not _has_excel_stamping_labels(config)
+    ):
         config = copy.deepcopy(config)
         config["enabled"] = False
     return config
@@ -193,6 +197,22 @@ def _write_number_mapping(job_dir: Path, entries: list[dict]) -> dict:
         "rows": rows,
         "size_bytes": path.stat().st_size,
     }
+
+
+def _attach_final_mapping(entries: list[dict], pdf_name: str) -> None:
+    for position, entry in enumerate(entries, start=1):
+        entry["matched_docx"] = entry.get("matched_docx") or entry.get("matched_file")
+        entry["assigned_number"] = (
+            entry.get("assigned_number")
+            or entry.get("stamp_label")
+            or entry.get("rcsme_reg_no")
+            or entry.get("decree_no")
+            or ""
+        )
+        entry["pdf_name"] = pdf_name
+        entry["pdf_position"] = position
+        entry["final_page"] = position
+        entry["result_pdf_name"] = pdf_name
 
 
 @asynccontextmanager
@@ -633,9 +653,7 @@ async def _run_build_job(job_id: str):
             validation.get("stamping", {}).get("config"),
         )
         download_name = _result_pdf_name(1, converted_entries)
-        for page_index, entry in enumerate(converted_entries, start=1):
-            entry["final_page"] = page_index
-            entry["result_pdf_name"] = download_name
+        _attach_final_mapping(converted_entries, download_name)
         output_pdf = job_dir / "result" / download_name
         merge = merge_pdfs(stamped_paths, output_pdf)
         report_csv = job_dir / "result" / "report.csv"
@@ -756,9 +774,7 @@ async def _build_registration_job(job_id: str, state: dict):
             download_name = _result_pdf_name(group_index, converted_entries)
             output_pdf = output_dir / download_name
             merge = merge_pdfs(stamped_paths, output_pdf)
-            for page_index, entry in enumerate(converted_entries, start=1):
-                entry["final_page"] = page_index
-                entry["result_pdf_name"] = download_name
+            _attach_final_mapping(converted_entries, download_name)
 
             result_pdfs.append(
                 {
@@ -903,9 +919,8 @@ async def _build_excel_job(job_id: str, state: dict):
             download_name = _result_pdf_name(group_index, converted_entries)
             output_pdf = output_dir / download_name
             merge = merge_pdfs(stamped_paths, output_pdf)
-            for page_index, entry in enumerate(converted_entries, start=1):
-                entry["final_page"] = page_index
-                entry["result_pdf_name"] = output_pdf.name
+            _attach_final_mapping(converted_entries, output_pdf.name)
+            for entry in converted_entries:
                 entry["group_column"] = group.get("column", "")
                 entry["stamp_column"] = group.get("stamping", {}).get("labels_column", "")
             result_pdfs.append(
@@ -926,7 +941,9 @@ async def _build_excel_job(job_id: str, state: dict):
             updated_group["merge"] = merge
             updated_group["stamping"] = {**(group.get("stamping") or {}), "build": stamp_summary}
             updated_groups.append(updated_group)
-            all_entries.extend({**entry, "group": group["title"]} for entry in converted_entries)
+            for entry in converted_entries:
+                entry["group"] = group["title"]
+            all_entries.extend(converted_entries)
             completed_before_group += len(converted_entries)
             await _save_progress(
                 job_id,

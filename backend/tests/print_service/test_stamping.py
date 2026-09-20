@@ -8,6 +8,7 @@ from app.print_service.services.matching_service import match_documents
 from app.print_service.services.stamping_service import (
     StampingValidationError,
     apply_stamping_to_validation,
+    generate_number_sequence,
     normalize_stamp_style,
     normalize_external_military_label,
     parse_external_military_xlsx,
@@ -99,6 +100,67 @@ def test_stamping_validation_preserves_order_and_does_not_generate_numbers():
         "6529-2026",
         "6531-2026",
     ]
+
+
+def test_generate_number_sequence_preserves_width_and_validates_format():
+    assert generate_number_sequence("7658-2026", 3) == ["7658-2026", "7659-2026", "7660-2026"]
+    assert generate_number_sequence("007-2026", 3) == ["007-2026", "008-2026", "009-2026"]
+
+    try:
+        generate_number_sequence("7658", 1)
+    except StampingValidationError as exc:
+        assert str(exc) == "Укажите начальный номер в формате 7658-2026."
+    else:
+        raise AssertionError("invalid sequence start was accepted")
+
+
+def test_auto_sequence_assigns_numbers_to_duplicate_source_rows():
+    validation = match_documents(
+        "аб2356\nаб2356",
+        docs("72 аб2356.docx", "62 аб2356.docx"),
+    )
+
+    result = apply_stamping_to_validation(
+        validation,
+        stamp_config("", source="auto_sequence", start_number="7658-2026"),
+    )
+
+    assert result["can_build"] is True
+    assert [entry["assigned_number"] for entry in result["entries"]] == [
+        "7658-2026",
+        "7659-2026",
+    ]
+
+
+def test_auto_sequence_is_continuous_across_excel_groups():
+    validation = {
+        "mode": "excel",
+        "groups": [
+            {"id": "group_a", "validation": match_documents("ии1", docs("Акт_ии1.docx"))},
+            {
+                "id": "group_b",
+                "validation": match_documents(
+                    "ии2\nии3",
+                    docs("Акт_ии2.docx", "Акт_ии3.docx"),
+                ),
+            },
+        ],
+        "warnings": [],
+        "blocking_errors": [],
+        "can_build": True,
+    }
+
+    result = apply_stamping_to_validation(
+        validation,
+        stamp_config("", source="auto_sequence", start_number="007658-2026"),
+    )
+
+    labels = [
+        entry["assigned_number"]
+        for group in result["groups"]
+        for entry in group["validation"]["entries"]
+    ]
+    assert labels == ["007658-2026", "007659-2026", "007660-2026"]
 
 
 def test_stamping_validation_blocks_count_mismatch():

@@ -9,13 +9,18 @@ from openpyxl.styles import Alignment, Font, PatternFill
 
 
 CSV_COLUMNS = [
+    "ID записи",
     "Группа",
     "Столбец документов",
     "Столбец меток",
     "Порядок",
     "Номер документа",
+    "Исходный номер",
+    "Канонический номер",
+    "Номер повтора",
     "Исходный файл",
     "Наносимая метка",
+    "Присвоенный номер",
     "Метка нанесена",
     "Страница документа",
     "Страница итогового PDF",
@@ -45,16 +50,21 @@ def write_csv_report(entries: list[dict[str, Any]], output_path: Path) -> None:
             writer.writerow(
                 {
                     "Порядок": entry.get("order", ""),
+                    "ID записи": entry.get("entry_id", ""),
                     "Группа": entry.get("group", ""),
                     "Столбец документов": entry.get("group_column", ""),
                     "Столбец меток": entry.get("stamp_column", ""),
                     "Номер документа": entry.get("number", ""),
-                    "Исходный файл": entry.get("matched_file") or "",
+                    "Исходный номер": entry.get("source_number_original") or entry.get("number", ""),
+                    "Канонический номер": entry.get("source_number_canonical", ""),
+                    "Номер повтора": entry.get("occurrence_index", ""),
+                    "Исходный файл": entry.get("matched_docx") or entry.get("matched_file") or "",
                     "Наносимая метка": entry.get("stamp_label") or "",
+                    "Присвоенный номер": entry.get("assigned_number") or entry.get("stamp_label") or "",
                     "Метка нанесена": "да" if entry.get("stamp_applied") else "нет",
                     "Страница документа": entry.get("pages") or "",
-                    "Страница итогового PDF": entry.get("final_page") or entry.get("order", ""),
-                    "Итоговый PDF": entry.get("result_pdf_name") or "",
+                    "Страница итогового PDF": entry.get("pdf_position") or entry.get("final_page") or entry.get("order", ""),
+                    "Итоговый PDF": entry.get("pdf_name") or entry.get("result_pdf_name") or "",
                     "Статус сопоставления": entry.get("status", ""),
                     "Статус конвертации": entry.get("conversion_status", ""),
                     "Количество страниц": entry.get("pages") or "",
@@ -74,29 +84,49 @@ def write_number_mapping_xlsx(entries: list[dict[str, Any]], output_path: Path) 
     sheet.freeze_panes = "A2"
     sheet.append(["Исходный номер", "Присвоенный номер"])
 
-    header_fill = PatternFill(fill_type="solid", fgColor="DCEAEC")
-    for cell in sheet[1]:
-        cell.font = Font(bold=True, color="203238")
-        cell.fill = header_fill
-        cell.alignment = Alignment(vertical="center")
-
     for entry in entries:
-        source_number = entry.get("external_military_no") or entry.get("number") or ""
+        source_number = (
+            entry.get("source_number_original")
+            or entry.get("external_military_no")
+            or entry.get("number")
+            or ""
+        )
         assigned_number = (
-            entry.get("stamp_label")
+            entry.get("assigned_number")
+            or entry.get("stamp_label")
             or entry.get("rcsme_reg_no")
             or entry.get("decree_no")
             or ""
         )
         sheet.append([str(source_number), str(assigned_number)])
 
-    for row in sheet.iter_rows(min_row=2, min_col=1, max_col=2):
-        for cell in row:
-            cell.number_format = "@"
-            cell.alignment = Alignment(vertical="top")
-    sheet.column_dimensions["A"].width = 28
-    sheet.column_dimensions["B"].width = 28
-    sheet.auto_filter.ref = f"A1:B{max(1, sheet.max_row)}"
+    details = workbook.create_sheet("Детали")
+    details.freeze_panes = "A2"
+    details.append(["Исходный номер", "Присвоенный номер", "Файл DOCX", "PDF", "Позиция в PDF"])
+    for entry in entries:
+        details.append(
+            [
+                str(entry.get("source_number_original") or entry.get("external_military_no") or entry.get("number") or ""),
+                str(entry.get("assigned_number") or entry.get("stamp_label") or entry.get("rcsme_reg_no") or entry.get("decree_no") or ""),
+                str(entry.get("matched_docx") or entry.get("matched_file") or ""),
+                str(entry.get("pdf_name") or entry.get("result_pdf_name") or ""),
+                entry.get("pdf_position") or entry.get("final_page") or entry.get("order") or "",
+            ]
+        )
+
+    header_fill = PatternFill(fill_type="solid", fgColor="DCEAEC")
+    for current, widths in ((sheet, (28, 28)), (details, (28, 28, 44, 36, 18))):
+        for cell in current[1]:
+            cell.font = Font(bold=True, color="203238")
+            cell.fill = header_fill
+            cell.alignment = Alignment(vertical="center")
+        for row in current.iter_rows(min_row=2):
+            for cell in row:
+                cell.number_format = "@"
+                cell.alignment = Alignment(vertical="top")
+        for column_index, width in enumerate(widths, start=1):
+            current.column_dimensions[chr(64 + column_index)].width = width
+        current.auto_filter.ref = f"A1:{chr(64 + len(widths))}{max(1, current.max_row)}"
     workbook.save(output_path)
     workbook.close()
     return len(entries)

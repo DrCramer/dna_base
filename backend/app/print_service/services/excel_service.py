@@ -6,7 +6,7 @@ from typing import Any
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
-from app.print_service.services.matching_service import contains_number_token, match_documents, normalize_text
+from app.print_service.services.matching_service import canonical_match_key, contains_number_token, match_documents
 
 
 class ExcelValidationError(ValueError):
@@ -14,8 +14,11 @@ class ExcelValidationError(ValueError):
 
 
 def _document_contains(documents: list[dict[str, Any]], number: str) -> bool:
-    normalized = normalize_text(number)
-    return any(contains_number_token(normalize_text(Path(doc["original_name"]).stem), normalized) for doc in documents)
+    canonical = canonical_match_key(number)
+    return any(
+        contains_number_token(canonical_match_key(Path(doc["original_name"]).stem), canonical)
+        for doc in documents
+    )
 
 
 def parse_excel_sequences(path: Path, documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -72,7 +75,7 @@ def match_excel_groups(path: Path, documents: list[dict[str, Any]]) -> dict[str,
     validated_groups: list[dict[str, Any]] = []
 
     for group in groups:
-        validation = match_documents(group["sequence"], documents)
+        validation = match_documents(group["sequence"], documents, entry_id_prefix=group["id"])
         validation["unused_documents"] = []
         for entry in validation["entries"]:
             if entry.get("doc_id"):

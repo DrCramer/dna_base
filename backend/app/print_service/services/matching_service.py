@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unicodedata
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -32,13 +33,26 @@ def diagnostic_signature(value: str) -> str:
     return normalize_text(value).translate(CONFUSABLE_TO_LATIN)
 
 
+def canonical_match_key(value: str) -> str:
+    return normalize_text(value).replace("/", "_")
+
+
 def parse_sequence(sequence: str) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for line_number, raw in enumerate(sequence.splitlines(), start=1):
-        number = normalize_text(raw)
-        if not number:
+        original = raw.strip()
+        canonical = canonical_match_key(original)
+        if not canonical:
             continue
-        items.append({"line": line_number, "number": number, "raw": raw.strip()})
+        items.append(
+            {
+                "line": line_number,
+                "number": original,
+                "raw": original,
+                "source_number_original": original,
+                "source_number_canonical": canonical,
+            }
+        )
     return items
 
 
@@ -62,38 +76,93 @@ def contains_number_token(haystack: str, needle: str) -> bool:
     return False
 
 
-def match_documents(sequence: str, documents: list[dict[str, Any]]) -> dict[str, Any]:
+def _occurrence_error(number: str, occurrences: int, matches: int) -> str:
+    def noun(count: int, one: str, few: str, many: str) -> str:
+        mod10 = count % 10
+        mod100 = count % 100
+        if mod10 == 1 and mod100 != 11:
+            return one
+        if 2 <= mod10 <= 4 and not 12 <= mod100 <= 14:
+            return few
+        return many
+
+    if matches == 0:
+        return (
+            f"Для номера {number} указано {occurrences} "
+            f"{noun(occurrences, 'запись', 'записи', 'записей')}, документы не найдены."
+        )
+    if occurrences > matches:
+        record_word = noun(occurrences, "запись", "записи", "записей")
+        found = (
+            "найден только 1 документ"
+            if matches == 1
+            else f"найдено только {matches} {noun(matches, 'документ', 'документа', 'документов')}"
+        )
+        return f"Для номера {number} указано {occurrences} {record_word}, {found}."
+    return (
+        f"Для номера {number} найдено {matches} "
+        f"{noun(matches, 'документ', 'документа', 'документов')}. Нужно уточнить соответствие."
+    )
+
+
+def match_documents(
+    sequence: str,
+    documents: list[dict[str, Any]],
+    *,
+    entry_id_prefix: str = "entry",
+) -> dict[str, Any]:
     items = parse_sequence(sequence)
     entries: list[dict[str, Any]] = []
     warnings: list[str] = []
     blocking_errors: list[str] = []
-    normalized_names = {doc["id"]: _stem(doc["original_name"]) for doc in documents}
-    used_doc_ids: list[str] = []
-
-    first_seen: dict[str, int] = {}
-    duplicate_lines: dict[str, list[int]] = {}
-    for item in items:
-        number = item["number"]
-        if number in first_seen:
-            duplicate_lines.setdefault(number, [first_seen[number]]).append(item["line"])
-        else:
-            first_seen[number] = item["line"]
-
+    canonical_names = {doc["id"]: canonical_match_key(_stem(doc["original_name"])) for doc in documents}
+    items_by_key: dict[str, list[tuple[int, dict[str, Any]]]] = defaultdict(list)
     for order, item in enumerate(items, start=1):
-        number = item["number"]
-        matches = [doc for doc in documents if contains_number_token(normalized_names[doc["id"]], number)]
-        candidate_signature = diagnostic_signature(number)
+        items_by_key[item["source_number_canonical"]].append((order, item))
+
+    assignments: dict[int, dict[str, Any]] = {}
+    group_errors: dict[int, str] = {}
+    group_diagnostics: dict[int, list[str]] = {}
+    missing_orders: set[int] = set()
+    for canonical, occurrences in items_by_key.items():
+        matches = [doc for doc in documents if contains_number_token(canonical_names[doc["id"]], canonical)]
+        if len(matches) == len(occurrences):
+            assignments.update(
+                (order, doc)
+                for (order, _item), doc in zip(occurrences, matches, strict=True)
+            )
+            continue
+        display_number = occurrences[0][1]["source_number_original"]
+        error = _occurrence_error(display_number, len(occurrences), len(matches))
+        candidate_signature = diagnostic_signature(canonical)
         diagnostic_matches = [
             doc
             for doc in documents
-            if contains_number_token(diagnostic_signature(normalized_names[doc["id"]]), candidate_signature)
-            and not contains_number_token(normalized_names[doc["id"]], number)
+            if contains_number_token(diagnostic_signature(canonical_names[doc["id"]]), candidate_signature)
+            and not contains_number_token(canonical_names[doc["id"]], canonical)
         ]
+        for order, _item in occurrences:
+            group_errors[order] = error
+            if not matches:
+                missing_orders.add(order)
+            if diagnostic_matches:
+                group_diagnostics[order] = [doc["original_name"] for doc in diagnostic_matches[:3]]
+
+    occurrence_counts: dict[str, int] = defaultdict(int)
+    for order, item in enumerate(items, start=1):
+        canonical = item["source_number_canonical"]
+        occurrence_counts[canonical] += 1
+        number = item["source_number_original"]
         entry = {
+            "entry_id": f"{entry_id_prefix}_{order:06d}",
             "order": order,
             "line": item["line"],
             "number": number,
+            "source_number_original": number,
+            "source_number_canonical": canonical,
+            "occurrence_index": occurrence_counts[canonical],
             "matched_file": None,
+            "matched_docx": None,
             "doc_id": None,
             "status": "Готов",
             "blocking": False,
@@ -103,30 +172,21 @@ def match_documents(sequence: str, documents: list[dict[str, Any]]) -> dict[str,
             "page_size": "",
             "conversion_status": "Ожидает",
         }
-        if number in duplicate_lines:
-            entry["status"] = "Ошибка"
+        if order in group_errors:
+            entry["status"] = "Не найден" if order in missing_orders else "Ошибка"
             entry["blocking"] = True
-            entry["error"] = f"Номер повторяется в строках {', '.join(map(str, duplicate_lines[number]))}"
-        elif len(matches) == 0:
-            entry["status"] = "Не найден"
-            entry["blocking"] = True
-            entry["error"] = "Подходящий DOCX не найден"
-            if diagnostic_matches:
-                names = ", ".join(doc["original_name"] for doc in diagnostic_matches[:3])
+            entry["error"] = group_errors[order]
+            if order in group_diagnostics:
+                names = ", ".join(group_diagnostics[order])
                 entry["warnings"].append(
                     "Возможное совпадение: похожие кириллические и латинские символы. "
                     f"Проверьте файл: {names}"
                 )
-        elif len(matches) > 1:
-            entry["status"] = "Ошибка"
-            entry["blocking"] = True
-            entry["error"] = "Найдено несколько подходящих DOCX"
-            entry["warnings"].append(", ".join(doc["original_name"] for doc in matches))
         else:
-            doc = matches[0]
+            doc = assignments[order]
             entry["matched_file"] = doc["original_name"]
+            entry["matched_docx"] = doc["original_name"]
             entry["doc_id"] = doc["id"]
-            used_doc_ids.append(doc["id"])
         entries.append(entry)
 
     doc_usage: dict[str, list[int]] = {}

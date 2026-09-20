@@ -58,11 +58,13 @@ def test_frontend_keeps_stamp_settings_between_tasks():
     assert "removeItem(STORAGE.stampUi)" not in text
 
 
-def test_frontend_does_not_restore_stamp_enabled_between_tasks():
+def test_frontend_enables_auto_stamping_for_each_new_task():
     text = APP_JS.read_text(encoding="utf-8")
     save_function = text.split("function saveStampUiSettings()", 1)[1].split("function restoreStampUiSettings()", 1)[0]
     assert "enabled:" not in save_function
-    assert "els.stampEnabledInput.checked = false" in text
+    assert "els.stampEnabledInput.checked = true" in text
+    assert 'stampSourceMode: "auto_sequence"' in text
+    assert "els.stampBorderInput.checked = true" in text
 
 
 def test_frontend_does_not_send_empty_excel_stamp_labels_for_initial_validation():

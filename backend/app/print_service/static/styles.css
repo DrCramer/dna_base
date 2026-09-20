@@ -624,6 +624,39 @@ h3 {
   border-top: 1px solid var(--line);
 }
 
+.stamp-auto-block,
+#stampManualBlock {
+  display: grid;
+  gap: 10px;
+}
+
+.stamp-start-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) auto auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.stamp-start-row input {
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+}
+
+.stamp-generated-preview {
+  max-height: 220px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
 .stamp-options {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
@@ -1299,6 +1332,10 @@ td.truncate {
 }
 
 @media (max-width: 900px) {
+  .stamp-start-row {
+    grid-template-columns: 1fr;
+  }
+
   .header-inner,
   .summary-panel,
   .panel-head,

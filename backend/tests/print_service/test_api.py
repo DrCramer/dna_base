@@ -322,7 +322,14 @@ def test_result_pdf_name_uses_actual_entry_order(index, entries, expected):
 def test_number_mapping_xlsx_preserves_final_pdf_order(tmp_path):
     path = tmp_path / "mapping.xlsx"
     entries = [
-        {"number": "ии10", "stamp_label": "7701-2026"},
+        {
+            "number": "ии10/1",
+            "source_number_original": "ии10/1",
+            "assigned_number": "7701-2026",
+            "matched_docx": "Акт_ии10_1.docx",
+            "pdf_name": "1-(ии10_1-ии100).pdf",
+            "pdf_position": 1,
+        },
         {"number": "ии2", "stamp_label": "7700-2026"},
         {"number": "ии100", "stamp_label": "7702-2026"},
     ]
@@ -331,13 +338,28 @@ def test_number_mapping_xlsx_preserves_final_pdf_order(tmp_path):
 
     workbook = load_workbook(path, read_only=True, data_only=True)
     rows = list(workbook.active.iter_rows(values_only=True))
+    detail_rows = list(workbook["Детали"].iter_rows(values_only=True))
     workbook.close()
     assert rows == [
         ("Исходный номер", "Присвоенный номер"),
-        ("ии10", "7701-2026"),
+        ("ии10/1", "7701-2026"),
         ("ии2", "7700-2026"),
         ("ии100", "7702-2026"),
     ]
+    assert detail_rows[0] == (
+        "Исходный номер",
+        "Присвоенный номер",
+        "Файл DOCX",
+        "PDF",
+        "Позиция в PDF",
+    )
+    assert detail_rows[1] == (
+        "ии10/1",
+        "7701-2026",
+        "Акт_ии10_1.docx",
+        "1-(ии10_1-ии100).pdf",
+        1,
+    )
 
 
 def test_upload_keeps_safe_relative_folder_path(client):

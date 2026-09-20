@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Party, RegistryObject, User
 from app.parsers.normalization import normalize_number, number_base
 from app.print_service.models import AutoRegistrationPayload
+from app.print_service.services.matching_service import canonical_match_key
 from app.print_service.services.stamping_service import (
     apply_stamping_to_validation,
     default_stamp_config,
@@ -384,15 +385,24 @@ def build_registration_validation(documents: list[dict[str, Any]], preview: dict
     by_id = {doc["id"]: doc for doc in documents}
     entries: list[dict[str, Any]] = []
     labels: list[str] = []
+    occurrence_counts: dict[str, int] = {}
     for order, row in enumerate(preview["rows"], start=1):
         doc = by_id.get(row["doc_id"])
+        source_number = row["external_military_no"] or row["decree_no"]
+        canonical = canonical_match_key(source_number)
+        occurrence_counts[canonical] = occurrence_counts.get(canonical, 0) + 1
         labels.append(row["stamp_label"])
         entries.append(
             {
+                "entry_id": f"registration_{order:06d}",
                 "order": order,
                 "line": order,
-                "number": row["external_military_no"] or row["decree_no"],
+                "number": source_number,
+                "source_number_original": source_number,
+                "source_number_canonical": canonical,
+                "occurrence_index": occurrence_counts[canonical],
                 "matched_file": doc["original_name"] if doc else row["document_name"],
+                "matched_docx": doc["original_name"] if doc else row["document_name"],
                 "doc_id": row["doc_id"],
                 "status": "Готов",
                 "blocking": False,

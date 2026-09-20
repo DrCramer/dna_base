@@ -37,8 +37,10 @@ DEFAULT_STAMP_STYLE = {
     "font_size": 12,
     "bold": False,
     "white_background": False,
-    "border": False,
+    "border": True,
 }
+
+SEQUENCE_START_RE = re.compile(r"^(\d+)-(\d{4})$")
 
 
 FONT_CANDIDATES = {
@@ -57,6 +59,7 @@ def default_stamp_config() -> dict[str, Any]:
     return {
         "enabled": False,
         "source": "manual",
+        "start_number": "",
         "text": "",
         "groups": {},
         "reject_duplicates": False,
@@ -70,7 +73,9 @@ def normalize_stamp_config(raw: dict[str, Any] | None) -> dict[str, Any]:
     if not raw:
         return config
     config["enabled"] = bool(raw.get("enabled"))
-    config["source"] = str(raw.get("source") or "manual")[:30]
+    source = str(raw.get("source") or "manual")[:30]
+    config["source"] = source if source in {"manual", "auto_sequence", "registration"} else "manual"
+    config["start_number"] = str(raw.get("start_number") or "").strip()
     config["text"] = str(raw.get("text") or "")
     config["groups"] = raw.get("groups") if isinstance(raw.get("groups"), dict) else {}
     config["reject_duplicates"] = bool(raw.get("reject_duplicates"))
@@ -232,6 +237,16 @@ def validate_label(label: str) -> None:
             raise StampingValidationError("Метка содержит управляющий символ")
 
 
+def generate_number_sequence(start_number: str, count: int) -> list[str]:
+    match = SEQUENCE_START_RE.fullmatch(str(start_number or "").strip())
+    if not match:
+        raise StampingValidationError("Укажите начальный номер в формате 7658-2026.")
+    numeric_text, year = match.groups()
+    start = int(numeric_text)
+    width = len(numeric_text)
+    return [f"{start + offset:0{width}d}-{year}" for offset in range(max(0, count))]
+
+
 def apply_stamping_to_validation(validation: dict[str, Any], raw_config: dict[str, Any] | None) -> dict[str, Any]:
     config = normalize_stamp_config(raw_config)
     validation["stamping"] = {
@@ -254,7 +269,11 @@ def apply_stamping_to_validation(validation: dict[str, Any], raw_config: dict[st
 
 def _apply_text_stamping(validation: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
     entries = validation.get("entries") or []
-    labels = parse_label_text(config.get("text") or "")
+    labels = (
+        generate_number_sequence(config.get("start_number") or "", len(entries))
+        if config.get("source") == "auto_sequence"
+        else parse_label_text(config.get("text") or "")
+    )
     errors, warnings, summary = validate_label_count(entries, labels, config)
     _attach_labels(entries, labels, config)
     validation["stamping"] = {"config": config, "summary": summary}
@@ -272,14 +291,30 @@ def _apply_excel_stamping(validation: dict[str, Any], config: dict[str, Any]) ->
     duplicate_count = 0
     labels_total = 0
     groups_config = config.get("groups") or {}
+    all_entries = [
+        entry
+        for group in validation.get("groups") or []
+        for entry in group["validation"].get("entries") or []
+    ]
+    generated_labels = (
+        generate_number_sequence(config.get("start_number") or "", len(all_entries))
+        if config.get("source") == "auto_sequence"
+        else []
+    )
+    generated_offset = 0
     for group in validation.get("groups") or []:
         group_id = group.get("id") or group.get("column") or group.get("title")
         group_config = groups_config.get(group_id) or groups_config.get(group.get("column")) or {}
         if isinstance(group_config, str):
             group_config = {"text": group_config}
-        labels = parse_label_text(str(group_config.get("text") or ""))
-        errors, warnings, summary = validate_label_count(group["validation"].get("entries") or [], labels, config)
-        _attach_labels(group["validation"].get("entries") or [], labels, config)
+        entries = group["validation"].get("entries") or []
+        if config.get("source") == "auto_sequence":
+            labels = generated_labels[generated_offset : generated_offset + len(entries)]
+            generated_offset += len(entries)
+        else:
+            labels = parse_label_text(str(group_config.get("text") or ""))
+        errors, warnings, summary = validate_label_count(entries, labels, config)
+        _attach_labels(entries, labels, config)
         group["stamping"] = {
             "labels_column": group_config.get("column") or "",
             "summary": summary,
@@ -347,6 +382,7 @@ def _attach_labels(entries: list[dict[str, Any]], labels: list[str], config: dic
     for index, entry in enumerate(entries):
         label = labels[index] if index < len(labels) else ""
         entry["stamp_label"] = label
+        entry["assigned_number"] = label
         entry["stamp_skip"] = bool(label and is_skip_label(label, config))
         entry["stamp_applied"] = False
 

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Порядок печати DOCX</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/print/static/styles.css?v=20260920-ui-simplification" />
+    <link rel="stylesheet" href="/print/static/styles.css?v=20260920-auto-numbering" />
   </head>
   <body
     class="{% if embedded %}embedded{% endif %}"
@@ -269,19 +269,32 @@
 
         <div id="stampPanel" class="mode-panel stamp-panel" hidden>
           <label class="toggle-row">
-            <input id="stampEnabledInput" type="checkbox" />
+            <input id="stampEnabledInput" type="checkbox" checked />
             <span>
-              <strong id="stampPanelTitle">Нанести номера на документы (необязательно)</strong>
-              <small id="stampPanelSubtitle">Готовые номера будут нанесены на документы по строкам, в указанном порядке.</small>
+              <strong id="stampPanelTitle">Нанести номера на документы</strong>
+              <small id="stampPanelSubtitle">Укажите начальный номер, остальные будут рассчитаны по порядку документов.</small>
             </span>
           </label>
 
           <div id="stampControls" class="stamp-controls" hidden>
             <div class="panel-head">
               <div>
-                <h3 id="stampControlsTitle">Номера для нанесения на документы</h3>
-                <p id="stampControlsSubtitle">Загрузите или вставьте номера, которые нужно напечатать на каждом документе. Один номер — одна строка. Порядок строк должен совпадать с порядком документов.</p>
+                <h3 id="stampControlsTitle">Нумерация документов</h3>
+                <p id="stampControlsSubtitle">Количество и диапазон будут рассчитаны после проверки порядка.</p>
               </div>
+            </div>
+
+            <div id="stampAutoBlock" class="stamp-auto-block">
+              <label class="field-label" for="stampStartNumberInput">Начальный номер</label>
+              <div class="stamp-start-row">
+                <input id="stampStartNumberInput" type="text" inputmode="numeric" autocomplete="off" placeholder="7658-2026" />
+                <button id="showGeneratedNumbersButton" class="secondary" type="button">Показать список</button>
+                <button id="useManualStampButton" class="secondary" type="button">Использовать готовый список</button>
+              </div>
+              <pre id="stampGeneratedPreview" class="stamp-generated-preview" hidden></pre>
+            </div>
+
+            <div id="stampManualBlock" hidden>
               <div id="stampSourceActions" class="inline-actions">
                 <label class="file-button secondary">
                   <input id="stampTxtInput" type="file" accept=".txt,text/plain" />
@@ -292,15 +305,16 @@
                   Загрузить Excel с метками
                 </label>
                 <button id="clearStampButton" class="secondary" type="button">Очистить метки</button>
+                <button id="useAutoStampButton" class="secondary" type="button">Вернуться к начальной нумерации</button>
               </div>
-            </div>
 
-            <div id="stampTextBlock">
-              <label class="field-label" for="stampTextInput">Номера для нанесения</label>
-              <textarea id="stampTextInput" rows="8" spellcheck="false" placeholder="6528-2026&#10;6529-2026&#10;6531-2026"></textarea>
-            </div>
+              <div id="stampTextBlock">
+                <label class="field-label" for="stampTextInput">Номера для нанесения</label>
+                <textarea id="stampTextInput" rows="8" spellcheck="false" placeholder="6528-2026&#10;6529-2026&#10;6531-2026"></textarea>
+              </div>
 
-            <div id="stampExcelGroups" class="stamp-groups" hidden></div>
+              <div id="stampExcelGroups" class="stamp-groups" hidden></div>
+            </div>
 
             <details class="advanced-settings">
               <summary>Дополнительные настройки нанесения</summary>
@@ -328,14 +342,14 @@
               <label>Шрифт, pt <input id="stampFontSizeInput" type="number" min="6" max="48" step="1" value="12" /></label>
               <label><input id="stampBoldInput" type="checkbox" /> Жирный</label>
               <label><input id="stampBackgroundInput" type="checkbox" /> Белый фон</label>
-              <label><input id="stampBorderInput" type="checkbox" /> Рамка</label>
+              <label><input id="stampBorderInput" type="checkbox" checked /> Рамка</label>
               </div>
             </details>
 
             <div class="input-footer">
               <span id="stampSummary">Документов: 0 · Меток: 0</span>
               <div id="stampValidationActions" class="inline-actions">
-                <button id="applyStampingButton" class="secondary" type="button" disabled>Проверить метки</button>
+                <button id="applyStampingButton" class="secondary" type="button" disabled>Проверить номера</button>
                 <button id="stampPreviewButton" class="secondary" type="button" disabled>Показать пример</button>
               </div>
             </div>
@@ -444,6 +458,6 @@
       </form>
     </dialog>
 
-    <script src="/print/static/app.js?v=20260920-ui-simplification"></script>
+    <script src="/print/static/app.js?v=20260920-auto-numbering"></script>
   </body>
 </html>
