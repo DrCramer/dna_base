@@ -6,6 +6,7 @@ from typing import Any
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
+from app.parsers.excel_reader import read_workbook
 from app.print_service.services.matching_service import canonical_match_key, contains_number_token, match_documents
 
 
@@ -21,18 +22,41 @@ def _document_contains(documents: list[dict[str, Any]], number: str) -> bool:
     )
 
 
-def parse_excel_sequences(path: Path, documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _active_sheet_values(path: Path) -> tuple[str, list[list[Any]]]:
+    if path.suffix.lower() == ".xlsx":
+        try:
+            workbook = load_workbook(path, read_only=True, data_only=True)
+        except Exception as exc:
+            raise ExcelValidationError("Не удалось прочитать Excel-файл") from exc
+        sheet = workbook.active
+        values = [list(row) for row in sheet.iter_rows(values_only=True)]
+        title = sheet.title
+        workbook.close()
+        return title, values
     try:
-        workbook = load_workbook(path, read_only=True, data_only=True)
+        sheets = read_workbook(path)
     except Exception as exc:
         raise ExcelValidationError("Не удалось прочитать Excel-файл") from exc
+    if not sheets:
+        raise ExcelValidationError("В Excel-файле не найдено листов")
+    return next(iter(sheets.items()))
 
-    sheet = workbook.active
+
+def parse_excel_sequences(
+    path: Path,
+    documents: list[dict[str, Any]],
+    *,
+    excel_file_id: str = "excel_001",
+    excel_file_name: str | None = None,
+    include_file_in_title: bool = False,
+) -> list[dict[str, Any]]:
+    sheet_name, rows = _active_sheet_values(path)
+    max_column = max((len(row) for row in rows), default=0)
     groups: list[dict[str, Any]] = []
-    for column_index in range(1, sheet.max_column + 1):
+    for column_index in range(1, max_column + 1):
         raw_values: list[str] = []
-        for row_index in range(1, sheet.max_row + 1):
-            value = sheet.cell(row=row_index, column=column_index).value
+        for row in rows:
+            value = row[column_index - 1] if column_index <= len(row) else None
             if value is None:
                 continue
             text = str(value).strip()
@@ -41,7 +65,8 @@ def parse_excel_sequences(path: Path, documents: list[dict[str, Any]]) -> list[d
         if not raw_values:
             continue
 
-        title = f"Столбец {get_column_letter(column_index)}"
+        column = get_column_letter(column_index)
+        title = f"Столбец {column}"
         numbers = raw_values
         if len(raw_values) > 1 and not _document_contains(documents, raw_values[0]):
             later_matches = any(_document_contains(documents, value) for value in raw_values[1:])
@@ -51,24 +76,26 @@ def parse_excel_sequences(path: Path, documents: list[dict[str, Any]]) -> list[d
 
         if not numbers:
             continue
+        display_title = f"{Path(excel_file_name).stem} · {title}" if include_file_in_title and excel_file_name else title
         groups.append(
             {
-                "id": f"col_{get_column_letter(column_index)}",
-                "title": title,
-                "column": get_column_letter(column_index),
+                "id": f"{excel_file_id}:{sheet_name}:col_{column}",
+                "title": display_title,
+                "column": column,
+                "sheet": sheet_name,
+                "excel_file_id": excel_file_id,
+                "excel_file": excel_file_name or path.name,
                 "sequence": "\n".join(numbers),
                 "count": len(numbers),
             }
         )
-    workbook.close()
 
     if not groups:
         raise ExcelValidationError("В Excel-файле не найдено ни одного столбца с номерами")
     return groups
 
 
-def match_excel_groups(path: Path, documents: list[dict[str, Any]]) -> dict[str, Any]:
-    groups = parse_excel_sequences(path, documents)
+def _match_groups(groups: list[dict[str, Any]], documents: list[dict[str, Any]]) -> dict[str, Any]:
     used_doc_ids: set[str] = set()
     blocking_errors: list[str] = []
     warnings: list[str] = []
@@ -101,3 +128,48 @@ def match_excel_groups(path: Path, documents: list[dict[str, Any]]) -> dict[str,
         "total_groups": len(validated_groups),
         "total": sum(group["validation"]["total"] for group in validated_groups),
     }
+
+
+def match_excel_groups(path: Path, documents: list[dict[str, Any]]) -> dict[str, Any]:
+    groups = parse_excel_sequences(path, documents, excel_file_name=path.name)
+    result = _match_groups(groups, documents)
+    result["excel_files"] = [{"id": "excel_001", "name": path.name}]
+    return result
+
+
+def match_excel_files(files: list[dict[str, Any]], documents: list[dict[str, Any]]) -> dict[str, Any]:
+    groups: list[dict[str, Any]] = []
+    include_file_in_title = len(files) > 1
+    for item in files:
+        groups.extend(
+            parse_excel_sequences(
+                Path(item["path"]),
+                documents,
+                excel_file_id=item["id"],
+                excel_file_name=item["name"],
+                include_file_in_title=include_file_in_title,
+            )
+        )
+    if not groups:
+        raise ExcelValidationError("В Excel-файлах не найдено ни одного столбца с номерами")
+    result = _match_groups(groups, documents)
+    result["excel_files"] = [{"id": item["id"], "name": item["name"]} for item in files]
+    return result
+
+
+def rematch_excel_groups(
+    validation: dict[str, Any],
+    ordered_sequences: dict[str, list[str]],
+    documents: list[dict[str, Any]],
+) -> dict[str, Any]:
+    groups: list[dict[str, Any]] = []
+    for group in validation.get("groups") or []:
+        values = ordered_sequences.get(group["id"])
+        sequence = "\n".join(values) if values is not None else group["sequence"]
+        groups.append({key: value for key, value in group.items() if key != "validation"} | {
+            "sequence": sequence,
+            "count": len([line for line in sequence.splitlines() if line.strip()]),
+        })
+    result = _match_groups(groups, documents)
+    result["excel_files"] = list(validation.get("excel_files") or [])
+    return result

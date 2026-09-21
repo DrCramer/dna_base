@@ -11,6 +11,7 @@ import fitz
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
+from app.parsers.excel_reader import read_workbook
 
 MM_TO_POINT = 72 / 25.4
 MAX_LABEL_LENGTH = 100
@@ -185,14 +186,19 @@ def normalize_external_military_label(value: Any) -> str | None:
 
 
 def parse_external_military_xlsx(path: Path, column: str | None = None) -> dict[str, Any]:
+    workbook = None
     try:
-        workbook = load_workbook(path, read_only=True, data_only=True)
+        if path.suffix.lower() == ".xlsx":
+            workbook = load_workbook(path, read_only=True, data_only=True)
+            rows = [list(row) for row in workbook.active.iter_rows(values_only=True)]
+        else:
+            sheets = read_workbook(path)
+            rows = next(iter(sheets.values())) if sheets else []
     except Exception as exc:
         raise StampingValidationError("Не удалось прочитать Excel-файл с номерами № в в/ч №522") from exc
-    sheet = workbook.active
     selected_column = (column or "").strip().upper()
-    values_by_column: list[list[str]] = [[] for _ in range(sheet.max_column)]
-    for row in sheet.iter_rows(values_only=True):
+    values_by_column: list[list[str]] = [[] for _ in range(max((len(row) for row in rows), default=0))]
+    for row in rows:
         for column_index, value in enumerate(row):
             label = normalize_external_military_label(value)
             if label:
@@ -216,7 +222,8 @@ def parse_external_military_xlsx(path: Path, column: str | None = None) -> dict[
             )
             if letter == selected_column:
                 selected = values
-    workbook.close()
+    if workbook is not None:
+        workbook.close()
     return {
         "columns": columns,
         "selected_column": selected_column or None,

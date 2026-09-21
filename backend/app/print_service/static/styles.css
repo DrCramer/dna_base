@@ -503,6 +503,19 @@ h3 {
   white-space: nowrap;
 }
 
+.file-details {
+  margin: 10px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+}
+
+.file-details > summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
 .order-validation-notice {
   display: flex;
   align-items: center;

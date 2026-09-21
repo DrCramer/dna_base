@@ -17,7 +17,7 @@ from app.api.deps import current_user, db_session, edit_user
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import User
 from app.print_service.config import settings
-from app.print_service.models import AutoRegistrationPayload, SequencePayload, StampingPayload
+from app.print_service.models import AutoRegistrationPayload, ExcelSortPayload, SequencePayload, StampingPayload
 from app.print_service.services.archive_service import UploadValidationError, accept_uploads
 from app.print_service.services.auto_registration_service import (
     apply_auto_registration,
@@ -25,7 +25,11 @@ from app.print_service.services.auto_registration_service import (
 )
 from app.print_service.services.cleanup_service import cleanup_loop
 from app.print_service.services.conversion_service import ConversionError, convert_docx_to_pdf, convert_entries
-from app.print_service.services.excel_service import ExcelValidationError, match_excel_groups
+from app.print_service.services.excel_service import (
+    ExcelValidationError,
+    match_excel_files,
+    rematch_excel_groups,
+)
 from app.print_service.services.job_store import (
     create_job,
     delete_job,
@@ -361,8 +365,8 @@ async def create_job_endpoint(request: Request):
     ]
     if not files:
         raise HTTPException(status_code=400, detail="Загрузите хотя бы один DOCX или ZIP")
-    xlsx_files = [file for file in files if str(file.filename or "").lower().endswith(".xlsx")]
-    document_files = [file for file in files if file not in xlsx_files]
+    excel_files = [file for file in files if Path(str(file.filename or "")).suffix.lower() in {".xlsx", ".xls"}]
+    document_files = [file for file in files if file not in excel_files]
     if not document_files:
         raise HTTPException(status_code=400, detail="Загрузите хотя бы один DOCX или ZIP")
     state = create_job()
@@ -372,17 +376,18 @@ async def create_job_endpoint(request: Request):
         if not documents:
             raise UploadValidationError("Не найдено ни одного DOCX для обработки")
         external_excel = None
-        if xlsx_files:
-            external_path = job_dir / "extracted" / "external-military.xlsx"
+        if excel_files:
+            suffix = Path(str(excel_files[0].filename or "")).suffix.lower()
+            external_path = job_dir / "extracted" / f"external-military{suffix}"
             await _save_uploaded_xlsx(
-                xlsx_files[0],
+                excel_files[0],
                 external_path,
                 "Excel-файл с номерами № в в/ч №522 слишком большой",
             )
             external_excel = parse_external_military_xlsx(external_path)
             state["registration_external_numbers"] = external_excel["all_labels"]
             state["registration_external_excel"] = {
-                "filename": xlsx_files[0].filename,
+                "filename": excel_files[0].filename,
                 "count": len(external_excel["all_labels"]),
                 "column_count": external_excel["column_count"],
             }
@@ -435,29 +440,39 @@ async def validate_job(job_id: str, payload: SequencePayload):
 @api_router.post("/jobs/{job_id}/validate/excel")
 async def validate_excel_job(
     job_id: str,
-    file: UploadFile = File(...),
-    stamping_json: str | None = Form(default=None),
+    request: Request,
 ):
     state = _load_state_or_404(job_id)
     if not state.get("documents"):
         raise HTTPException(status_code=400, detail="В задаче нет загруженных DOCX")
-    filename = file.filename or ""
-    if not filename.lower().endswith(".xlsx"):
-        raise HTTPException(status_code=400, detail="Загрузите Excel-файл .xlsx")
+    form = await request.form(max_files=settings.max_files + 10, max_fields=20)
+    files = [
+        value
+        for key, value in form.multi_items()
+        if key in {"file", "files"} and hasattr(value, "filename") and hasattr(value, "read")
+    ]
+    if not files:
+        raise HTTPException(status_code=400, detail="Добавьте хотя бы один Excel-файл")
+    if any(Path(str(file.filename or "")).suffix.lower() not in {".xlsx", ".xls"} for file in files):
+        raise HTTPException(status_code=400, detail="Загрузите Excel-файлы .xlsx или .xls")
+    stamping_json = form.get("stamping_json")
     job_dir = get_job_dir(job_id)
-    excel_path = job_dir / "extracted" / "order.xlsx"
-    size = 0
-    with excel_path.open("wb") as handle:
-        while True:
-            chunk = await file.read(1024 * 1024)
-            if not chunk:
-                break
-            size += len(chunk)
-            if size > settings.max_single_file_bytes:
-                raise HTTPException(status_code=400, detail="Excel-файл слишком большой")
-            handle.write(chunk)
+    excel_dir = job_dir / "extracted" / "order-files"
+    excel_dir.mkdir(parents=True, exist_ok=True)
+    stored_files: list[dict] = []
+    for index, file in enumerate(files, start=1):
+        suffix = Path(str(file.filename or "")).suffix.lower()
+        excel_path = excel_dir / f"excel_{index:03d}{suffix}"
+        await _save_uploaded_xlsx(file, excel_path, "Excel-файл слишком большой")
+        stored_files.append(
+            {
+                "id": f"excel_{index:03d}",
+                "name": Path(str(file.filename or f"Excel {index}")).name,
+                "path": str(excel_path),
+            }
+        )
     try:
-        base_validation = match_excel_groups(excel_path, state["documents"])
+        base_validation = match_excel_files(stored_files, state["documents"])
         validation = copy.deepcopy(base_validation)
         validation = apply_stamping_to_validation(validation, _parse_excel_stamping_json(stamping_json))
     except (ExcelValidationError, StampingValidationError) as exc:
@@ -481,6 +496,40 @@ async def validate_excel_job(
     ]
     write_csv_report(flat_entries, job_dir / "result" / "report.csv")
     state["report_csv"] = "result/report.csv"
+    save_state(job_id, state)
+    save_report_json(job_id, {"job_id": job_id, "validation": validation, "build": None})
+    return validation
+
+
+@api_router.post("/jobs/{job_id}/sort/excel")
+async def sort_excel_job(job_id: str, payload: ExcelSortPayload):
+    state = _load_state_or_404(job_id)
+    current = state.get("base_validation") or state.get("validation")
+    if not current or current.get("mode") != "excel":
+        raise HTTPException(status_code=400, detail="Сначала проверьте Excel-файлы")
+    try:
+        base_validation = rematch_excel_groups(current, payload.groups, state["documents"])
+        validation = apply_stamping_to_validation(copy.deepcopy(base_validation), payload.stamping)
+    except StampingValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    state["base_validation"] = base_validation
+    state["validation"] = validation
+    state["stamping"] = validation.get("stamping")
+    state["status"] = "validated"
+    state["build"] = None
+    state["result_pdf"] = None
+    state["result_pdf_download_name"] = None
+    state["result_zip"] = None
+    state["result_zip_download_name"] = None
+    state["number_mapping_xlsx"] = None
+    state["report_csv"] = "result/report.csv"
+    job_dir = get_job_dir(job_id)
+    flat_entries = [
+        {**entry, "group": group["title"]}
+        for group in validation["groups"]
+        for entry in group["validation"]["entries"]
+    ]
+    write_csv_report(flat_entries, job_dir / "result" / "report.csv")
     save_state(job_id, state)
     save_report_json(job_id, {"job_id": job_id, "validation": validation, "build": None})
     return validation
@@ -1061,10 +1110,12 @@ async def parse_stamping_xlsx(
 ):
     state = _load_state_or_404(job_id)
     filename = file.filename or ""
-    if not filename.lower().endswith(".xlsx"):
-        raise HTTPException(status_code=400, detail="Загрузите Excel-файл .xlsx")
+    suffix = Path(filename).suffix.lower()
+    allowed_suffixes = {".xlsx", ".xls"} if purpose == "external_military" else {".xlsx"}
+    if suffix not in allowed_suffixes:
+        raise HTTPException(status_code=400, detail="Загрузите Excel-файл .xlsx или .xls")
     job_dir = get_job_dir(job_id)
-    labels_path = job_dir / "extracted" / "stamp-labels.xlsx"
+    labels_path = job_dir / "extracted" / f"stamp-labels{suffix}"
     await _save_uploaded_xlsx(file, labels_path, "Excel-файл с метками слишком большой")
     try:
         if purpose == "external_military":

@@ -81,6 +81,18 @@ def _external_numbers(payload: AutoRegistrationPayload, documents_count: int) ->
     return numbers
 
 
+def _documents_in_requested_order(
+    documents: list[dict[str, Any]],
+    document_order: list[str],
+) -> list[dict[str, Any]]:
+    if not document_order:
+        return documents
+    by_id = {document["id"]: document for document in documents}
+    if len(document_order) != len(documents) or set(document_order) != set(by_id):
+        raise HTTPException(status_code=400, detail="Порядок DOCX устарел. Обновите задачу и повторите сортировку.")
+    return [by_id[document_id] for document_id in document_order]
+
+
 def _ordered_documents_from_external_numbers(
     documents: list[dict[str, Any]],
     external_numbers: list[str],
@@ -215,6 +227,7 @@ async def build_auto_registration_preview(
         raise HTTPException(status_code=400, detail="В задаче нет загруженных DOCX")
     if payload.case_year < 1900 or payload.case_year > 2200:
         raise HTTPException(status_code=400, detail="Год должен быть в диапазоне 1900–2200")
+    documents = _documents_in_requested_order(documents, payload.document_order)
     start_party = _parse_positive_int(payload.start_party_no, "Стартовая партия")
     external_numbers = _external_numbers(payload, len(documents))
     external_source = "list" if external_numbers else "empty"

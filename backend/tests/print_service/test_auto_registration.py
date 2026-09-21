@@ -8,6 +8,7 @@ from app.print_service.main import (
     _registration_pdf_name,
 )
 from app.print_service.services.auto_registration_service import (
+    _documents_in_requested_order,
     _document_label,
     _external_numbers,
     _ordered_documents_from_external_numbers,
@@ -96,6 +97,18 @@ def test_document_label_keeps_compound_external_number():
     doc = {"original_name": "{№ трупа} - 21ПОСТ ген и8695-3 (РЦ СМЭ).docx"}
 
     assert _document_label(doc) == "и8695-3"
+
+
+def test_registration_uses_explicit_sorted_document_order_before_parties():
+    documents = [
+        {"id": "doc_10", "original_name": "Акт ии10.docx"},
+        {"id": "doc_2", "original_name": "Акт ии2.docx"},
+        {"id": "doc_1", "original_name": "Акт ии1.docx"},
+    ]
+
+    ordered = _documents_in_requested_order(documents, ["doc_1", "doc_2", "doc_10"])
+
+    assert [document["id"] for document in ordered] == ["doc_1", "doc_2", "doc_10"]
 
 
 def test_registration_validation_uses_decree_numbers_as_stamp_labels():

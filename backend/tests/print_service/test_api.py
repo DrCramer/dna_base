@@ -304,6 +304,12 @@ def test_excel_build_uses_range_names_in_files_zip_and_report(client, monkeypatc
     report = (main.get_job_dir(job_id) / state["report_csv"]).read_text(encoding="utf-8-sig")
     assert "1-(ее5968).pdf" in report
     assert "2-(ее6032).pdf" in report
+    workbook = load_workbook(main.get_job_dir(job_id) / state["number_mapping_xlsx"], read_only=True, data_only=True)
+    assert list(workbook["Сопоставление"].iter_rows(values_only=True))[1:] == [
+        ("ее5968", None),
+        ("ее6032", None),
+    ]
+    workbook.close()
 
 
 @pytest.mark.parametrize(
@@ -510,6 +516,100 @@ def test_excel_validation_ignores_enabled_stamping_without_group_labels(client, 
     assert data["can_build"] is True
     assert data["stamping"]["config"]["enabled"] is False
     assert data["stamping"]["summary"]["labels"] == 0
+
+
+def test_excel_validation_accepts_multiple_files_and_sorts_groups_independently(client, monkeypatch):
+    async def fake_convert_entries(entries, documents, job_dir, settings, progress_callback=None):
+        pdf_paths = []
+        for entry in entries:
+            path = Path(job_dir) / "converted" / f"{entry['doc_id']}.pdf"
+            writer = PdfWriter()
+            writer.add_blank_page(width=595, height=842)
+            with path.open("wb") as handle:
+                writer.write(handle)
+            entry["conversion_status"] = "Готов"
+            entry["pages"] = 1
+            entry["page_size"] = "210.0 × 297.0 мм · A4, книжная"
+            entry["pdf_path"] = str(path.relative_to(job_dir))
+            entry["pdf_analysis"] = {
+                "page_count": 1,
+                "pages": [{"width_mm": 210.0, "height_mm": 297.0, "rotate": 0}],
+                "empty_pages": [],
+            }
+            pdf_paths.append(path)
+        return entries, pdf_paths
+
+    monkeypatch.setattr(main, "convert_entries", fake_convert_entries)
+    upload = client.post(
+        "/api/print/jobs",
+        files=[
+            ("files", ("Акт_ии1.docx", b"1", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+            ("files", ("Акт_ии2.docx", b"2", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+            ("files", ("Акт_ии10.docx", b"10", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+            ("files", ("Акт_нн2.docx", b"n2", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+            ("files", ("Акт_нн10.docx", b"n10", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+        ],
+    )
+    job_id = upload.json()["id"]
+
+    def workbook_bytes(values):
+        workbook = Workbook()
+        sheet = workbook.active
+        for row, value in enumerate(values, start=1):
+            sheet.cell(row=row, column=1, value=value)
+        output = BytesIO()
+        workbook.save(output)
+        workbook.close()
+        return output.getvalue()
+
+    response = client.post(
+        f"/api/print/jobs/{job_id}/validate/excel",
+        files=[
+            ("files", ("first.xlsx", workbook_bytes(["ии10", "ии2", "ии1"]), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")),
+            ("files", ("second.xlsx", workbook_bytes(["нн10", "нн2"]), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")),
+        ],
+        data={"stamping_json": '{"enabled": false}'},
+    )
+
+    assert response.status_code == 200
+    validation = response.json()
+    assert [item["name"] for item in validation["excel_files"]] == ["first.xlsx", "second.xlsx"]
+    assert [group["column"] for group in validation["groups"]] == ["A", "A"]
+    assert len({group["id"] for group in validation["groups"]}) == 2
+
+    sort_response = client.post(
+        f"/api/print/jobs/{job_id}/sort/excel",
+        json={
+            "groups": {
+                validation["groups"][0]["id"]: ["ии1", "ии2", "ии10"],
+                validation["groups"][1]["id"]: ["нн2", "нн10"],
+            },
+            "stamping": {"enabled": False},
+        },
+    )
+
+    assert sort_response.status_code == 200
+    sorted_groups = sort_response.json()["groups"]
+    assert [entry["number"] for entry in sorted_groups[0]["validation"]["entries"]] == ["ии1", "ии2", "ии10"]
+    assert [entry["number"] for entry in sorted_groups[1]["validation"]["entries"]] == ["нн2", "нн10"]
+
+    build = client.post(f"/api/print/jobs/{job_id}/build?wait=true")
+
+    assert build.status_code == 200
+    assert [item["download_name"] for item in build.json()["result_pdfs"]] == [
+        "1-(ии1-ии10).pdf",
+        "2-(нн2-нн10).pdf",
+    ]
+    state = main.load_state(job_id)
+    workbook = load_workbook(main.get_job_dir(job_id) / state["number_mapping_xlsx"], read_only=True, data_only=True)
+    assert list(workbook["Сопоставление"].iter_rows(values_only=True))[1:] == [
+        ("ии1", None),
+        ("ии2", None),
+        ("ии10", None),
+        ("нн2", None),
+        ("нн10", None),
+    ]
+    workbook.close()
 
 
 def test_download_excel_part_pdf(client):

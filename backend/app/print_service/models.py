@@ -18,6 +18,11 @@ class StampingPayload(BaseModel):
     stamping: dict[str, Any] | None = None
 
 
+class ExcelSortPayload(BaseModel):
+    groups: dict[str, list[str]] = Field(default_factory=dict)
+    stamping: dict[str, Any] | None = None
+
+
 class AutoRegistrationPayload(BaseModel):
     start_party_no: str
     case_year: int
@@ -31,6 +36,7 @@ class AutoRegistrationPayload(BaseModel):
     box_no: str | None = None
     stamp_field: Literal["decree_no", "rcsme_reg_no"] = "decree_no"
     stamping: dict[str, Any] | None = None
+    document_order: list[str] = Field(default_factory=list)
 
 
 class ApiError(BaseModel):

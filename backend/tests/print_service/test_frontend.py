@@ -73,6 +73,26 @@ def test_frontend_does_not_send_empty_excel_stamp_labels_for_initial_validation(
     assert "return { ...config, enabled: false }" in text
 
 
+def test_frontend_uses_same_natural_sort_for_all_order_modes():
+    text = APP_JS.read_text(encoding="utf-8")
+
+    assert "function naturalSortValues(values)" in text
+    assert "const sorted = naturalSortValues(rows);" in text
+    assert "groups[group.id] = naturalSortValues(values);" in text
+    assert 'els.registrationExternalInput.value = naturalSortValues(numbers).join("\\n");' in text
+    assert "sortExcelButton.addEventListener" in text
+    assert "sortRegistrationButton.addEventListener" in text
+
+
+def test_frontend_accumulates_multiple_excel_files():
+    text = APP_JS.read_text(encoding="utf-8")
+
+    assert "excelFiles: []" in text
+    assert "function addExcelFiles(files)" in text
+    assert 'state.excelFiles.forEach((file) => formData.append("files", file, file.name));' in text
+    assert "Выбрано Excel-файлов" in text
+
+
 def test_registration_mode_shows_stamp_style_without_manual_label_options():
     text = APP_JS.read_text(encoding="utf-8")
     assert 'els.stampPanel.hidden = !hasMode;' in text

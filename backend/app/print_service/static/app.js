@@ -33,6 +33,7 @@ const state = {
   jobId: null,
   mode: null,
   excelFile: null,
+  excelFiles: [],
   canBuild: false,
   currentStep: "documents",
   pollTimer: null,
@@ -54,6 +55,7 @@ const state = {
   sequenceBeforeSort: null,
   sequenceInternalUpdate: false,
   stampSourceMode: "auto_sequence",
+  registrationDocumentOrder: [],
 };
 
 const els = {
@@ -113,6 +115,7 @@ const els = {
   registrationExternalTxtInput: document.querySelector("#registrationExternalTxtInput"),
   registrationExternalXlsxInput: document.querySelector("#registrationExternalXlsxInput"),
   clearRegistrationExternalButton: document.querySelector("#clearRegistrationExternalButton"),
+  sortRegistrationButton: document.querySelector("#sortRegistrationButton"),
   registrationExternalCount: document.querySelector("#registrationExternalCount"),
   registrationExternalWarnings: document.querySelector("#registrationExternalWarnings"),
   registrationSummary: document.querySelector("#registrationSummary"),
@@ -133,8 +136,12 @@ const els = {
   viewOrderValidationButton: document.querySelector("#viewOrderValidationButton"),
   xlsxInput: document.querySelector("#xlsxInput"),
   validateExcelButton: document.querySelector("#validateExcelButton"),
+  sortExcelButton: document.querySelector("#sortExcelButton"),
+  clearExcelFilesButton: document.querySelector("#clearExcelFilesButton"),
   excelFileState: document.querySelector("#excelFileState"),
   excelModeHint: document.querySelector("#excelModeHint"),
+  excelFilesDetails: document.querySelector("#excelFilesDetails"),
+  excelFilesList: document.querySelector("#excelFilesList"),
   stampPanel: document.querySelector("#stampPanel"),
   stampEnabledInput: document.querySelector("#stampEnabledInput"),
   stampControls: document.querySelector("#stampControls"),
@@ -227,6 +234,7 @@ function forgetLocalTask() {
   state.jobId = null;
   state.mode = null;
   state.excelFile = null;
+  state.excelFiles = [];
   state.canBuild = false;
   state.lastValidation = null;
   state.lastJob = null;
@@ -238,6 +246,7 @@ function forgetLocalTask() {
   state.pendingFolderNames.clear();
   state.txtFiles = [];
   state.sequenceBeforeSort = null;
+  state.registrationDocumentOrder = [];
   state.activeFilter = "all";
   state.resultLimit = 160;
   state.expandedGroups.clear();
@@ -363,11 +372,15 @@ function queuedRelativePath(record) {
     .replace(/^\/+/, "");
 }
 
+function isExcelFileName(name) {
+  return /\.(xlsx|xls)$/i.test(String(name || ""));
+}
+
 function uploadCounts(records) {
   const incoming = [...records];
   return {
-    excelFiles: incoming.filter((record) => queuedFile(record).name.toLowerCase().endsWith(".xlsx")),
-    documentFiles: incoming.filter((record) => !queuedFile(record).name.toLowerCase().endsWith(".xlsx")),
+    excelFiles: incoming.filter((record) => isExcelFileName(queuedFile(record).name)),
+    documentFiles: incoming.filter((record) => !isExcelFileName(queuedFile(record).name)),
   };
 }
 
@@ -387,7 +400,7 @@ function queueRecords(records, { folderSelection = false } = {}) {
     const name = file.name.toLowerCase();
     const temporary = file.name.startsWith("~$");
     const fromFolder = folderSelection || record?.source === "folder" || relativePath.includes("/");
-    const supported = fromFolder ? name.endsWith(".docx") : /\.(docx|zip|xlsx)$/.test(name);
+    const supported = fromFolder ? name.endsWith(".docx") : /\.(docx|zip|xlsx|xls)$/.test(name);
     if (temporary) return;
     if (!supported) {
       skipped += 1;
@@ -404,8 +417,11 @@ function queueRecords(records, { folderSelection = false } = {}) {
     }
   });
   state.pendingSkipped += skipped;
-  const excelRecord = state.pendingFiles.find((record) => queuedFile(record).name.toLowerCase().endsWith(".xlsx"));
-  state.excelFile = excelRecord ? queuedFile(excelRecord) : state.excelFile;
+  const excelRecords = state.pendingFiles.filter((record) => isExcelFileName(queuedFile(record).name));
+  if (excelRecords.length) {
+    state.excelFiles = excelRecords.map(queuedFile);
+    state.excelFile = state.excelFiles[0];
+  }
   renderPendingQueue();
   renderModePanels();
   if (added || skipped) {
@@ -451,7 +467,7 @@ function renderPendingQueue() {
   if (!records.length) return;
   const docx = records.filter((record) => queuedFile(record).name.toLowerCase().endsWith(".docx")).length;
   const zip = records.filter((record) => queuedFile(record).name.toLowerCase().endsWith(".zip")).length;
-  const xlsx = records.filter((record) => queuedFile(record).name.toLowerCase().endsWith(".xlsx")).length;
+  const xlsx = records.filter((record) => isExcelFileName(queuedFile(record).name)).length;
   const bytes = records.reduce((sum, record) => sum + queuedFile(record).size, 0);
   const folderCount = state.pendingFolderNames.size;
   const individualCount = records.filter((record) => record.source === "file").length;
@@ -489,7 +505,8 @@ function pendingQueueLimitError() {
 async function uploadFiles(records) {
   const { excelFiles, documentFiles } = uploadCounts(records);
   if (excelFiles.length) {
-    state.excelFile = queuedFile(excelFiles[0]);
+    state.excelFiles = excelFiles.map(queuedFile);
+    state.excelFile = state.excelFiles[0];
     renderModePanels();
     if (state.mode === "registration" && state.jobId) {
       await loadSelectedExcelAsRegistrationExternalNumbers();
@@ -552,6 +569,29 @@ function fileKey(file) {
   return file ? `${file.name}:${file.size}:${file.lastModified}` : "";
 }
 
+function invalidateExcelValidation() {
+  if (state.lastValidation?.mode !== "excel") return;
+  state.lastValidation = null;
+  state.canBuild = false;
+  state.lastJob = { ...(state.lastJob || {}), status: "uploaded", validation: null, build: null };
+}
+
+function addExcelFiles(files) {
+  const existing = new Set(state.excelFiles.map(fileKey));
+  let added = 0;
+  [...files].forEach((file) => {
+    if (!isExcelFileName(file.name) || existing.has(fileKey(file))) return;
+    existing.add(fileKey(file));
+    state.excelFiles.push(file);
+    added += 1;
+  });
+  if (added) invalidateExcelValidation();
+  state.excelFile = state.excelFiles[0] || null;
+  renderExcelState();
+  renderUploadSummary(state.lastJob);
+  if (added) showToast(`Добавлено Excel-файлов: ${added}`);
+}
+
 function showErrorInOrder(message) {
   setStep(state.jobId ? "order" : "documents");
   els.validationSummary.innerHTML = "";
@@ -579,8 +619,10 @@ function renderUploadSummary(job) {
   els.uploadStatus.textContent = job?.status === "ready" ? "✓ Задание восстановлено" : "✓ Документы загружены";
   els.uploadStatus.className = "status-pill good";
   els.acceptedCount.textContent = `Загружено ${docs.length} ${plural(docs.length, "DOCX", "DOCX", "DOCX")}`;
-  els.excelCountText.hidden = !state.excelFile;
-  els.excelCountText.textContent = state.excelFile ? `Выбран Excel-файл: ${state.excelFile.name}` : "";
+  els.excelCountText.hidden = state.excelFiles.length === 0;
+  els.excelCountText.textContent = state.excelFiles.length
+    ? `Выбрано Excel-файлов: ${state.excelFiles.length}`
+    : "";
 }
 
 function selectMode(mode) {
@@ -611,7 +653,7 @@ function renderModePanels() {
   if (state.mode === "text") {
     els.selectedModeText.textContent = "Выбран способ: Один список. Вставьте номера или загрузите TXT, затем нажмите «Проверить порядок».";
   } else if (state.mode === "excel") {
-    els.selectedModeText.textContent = "Выбран способ: Таблица Excel. Загрузите Excel-файл и нажмите «Проверить Excel».";
+    els.selectedModeText.textContent = "Выбран способ: Таблица Excel. Добавьте Excel-файлы и нажмите «Проверить Excel».";
   } else if (state.mode === "registration") {
     els.selectedModeText.textContent = "Выбран способ: Новые партии. Заполните данные и проверьте будущие партии.";
   }
@@ -706,21 +748,31 @@ function renderStampGroupInputs() {
 }
 
 function renderExcelState() {
+  const storedFiles = state.lastValidation?.mode === "excel" ? state.lastValidation.excel_files || [] : [];
+  const visibleFiles = state.excelFiles.length
+    ? state.excelFiles.map((file, index) => ({ id: `local_${index}`, name: file.name }))
+    : storedFiles;
   if (state.lastValidation?.mode === "excel") {
     const groups = state.lastValidation.groups || [];
     const documents = groups.reduce((sum, group) => sum + (group.validation?.entries?.length || 0), 0);
-    els.excelFileState.textContent = `Файл проверен: ${state.excelFile?.name || "Excel"}. Документов: ${documents}. Будет создано PDF: ${groups.length}.`;
+    els.excelFileState.textContent = `Выбрано Excel-файлов: ${visibleFiles.length}. Обнаружено рабочих столбцов: ${groups.length}. Документов: ${documents}.`;
     els.excelModeHint.textContent = els.stampEnabledInput.checked
-      ? `Excel проверен: ${groups.length} ${plural(groups.length, "PDF", "PDF", "PDF")}. Теперь загрузите номера для нанесения и нажмите «Проверить метки».`
+      ? `Excel проверен: ${groups.length} PDF. При необходимости отсортируйте столбцы, затем проверьте номера.`
       : `Excel проверен. Будет создано PDF: ${groups.length}.`;
-  } else if (state.excelFile) {
-    els.excelFileState.textContent = `Выбран файл: ${state.excelFile.name}`;
+  } else if (state.excelFiles.length) {
+    els.excelFileState.textContent = `Выбрано Excel-файлов: ${state.excelFiles.length}. Рабочие столбцы будут определены после проверки.`;
     els.excelModeHint.textContent = "Нажмите «Проверить Excel», чтобы найти столбцы и документы.";
   } else {
-    els.excelFileState.textContent = "Excel-файл ещё не выбран.";
-    els.excelModeHint.textContent = "Выберите XLSX-файл.";
+    els.excelFileState.textContent = "Excel-файлы ещё не выбраны.";
+    els.excelModeHint.textContent = "Добавьте XLSX или XLS.";
   }
-  els.validateExcelButton.disabled = !state.jobId || !state.excelFile;
+  els.excelFilesDetails.hidden = visibleFiles.length === 0;
+  els.excelFilesList.innerHTML = visibleFiles
+    .map((file, index) => `<span><span title="${escapeAttr(file.name)}">${index + 1}. ${escapeHtml(file.name)}</span></span>`)
+    .join("");
+  els.clearExcelFilesButton.hidden = state.excelFiles.length === 0;
+  els.validateExcelButton.disabled = !state.jobId || state.excelFiles.length === 0;
+  els.sortExcelButton.disabled = !state.jobId || state.lastValidation?.mode !== "excel";
 }
 
 function registrationPayload() {
@@ -744,6 +796,7 @@ function registrationPayload() {
     box_no: els.registrationBoxInput.value.trim() || null,
     stamp_field: "decree_no",
     stamping: { style: stampStyle },
+    document_order: state.registrationDocumentOrder,
   };
 }
 
@@ -1034,16 +1087,20 @@ function compareNaturalValues(left, right) {
   return 0;
 }
 
+function naturalSortValues(values) {
+  return values
+    .map((value, index) => ({ value, index }))
+    .sort((left, right) => compareNaturalValues(left.value, right.value) || left.index - right.index)
+    .map((item) => item.value);
+}
+
 function sortSequenceNaturally() {
   const rows = labelLines(els.sequenceInput.value);
   if (!rows.length) {
     showToast("Список номеров пуст");
     return;
   }
-  const sorted = rows
-    .map((value, index) => ({ value, index }))
-    .sort((left, right) => compareNaturalValues(left.value, right.value) || left.index - right.index)
-    .map((item) => item.value);
+  const sorted = naturalSortValues(rows);
   const nextValue = sorted.join("\n");
   const alreadySorted = nextValue === els.sequenceInput.value.trim();
   if (alreadySorted) {
@@ -1369,12 +1426,12 @@ async function validateTextJob() {
 }
 
 async function validateExcelJob() {
-  if (!state.jobId || !state.excelFile) return;
+  if (!state.jobId || !state.excelFiles.length) return;
   const stampingEnabled = els.stampEnabledInput.checked;
-  setStatus("Проверяем Excel-файл…", "info");
+  setStatus("Проверяем Excel-файлы…", "info");
   els.validateExcelButton.disabled = true;
   const formData = new FormData();
-  formData.append("file", state.excelFile);
+  state.excelFiles.forEach((file) => formData.append("files", file, file.name));
   formData.append("stamping_json", JSON.stringify(collectExcelValidationStampingConfig()));
   try {
     const response = await fetch(`/api/print/jobs/${state.jobId}/validate/excel`, {
@@ -1400,6 +1457,63 @@ async function validateExcelJob() {
     renderModePanels();
     updateHeader();
   }
+}
+
+async function sortExcelGroupsNaturally() {
+  if (!state.jobId || state.lastValidation?.mode !== "excel") return;
+  const groups = {};
+  (state.lastValidation.groups || []).forEach((group) => {
+    const values = (group.validation?.entries || []).map((entry) => entry.source_number_original || entry.number);
+    groups[group.id] = naturalSortValues(values);
+  });
+  const stamping = collectStampingConfig();
+  stamping.enabled = Boolean(state.lastValidation.stamping?.config?.enabled);
+  els.sortExcelButton.disabled = true;
+  setStatus("Сортируем столбцы…", "info");
+  try {
+    const response = await fetch(`/api/print/jobs/${state.jobId}/sort/excel`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ groups, stamping }),
+    });
+    const data = await readJson(response);
+    if (!response.ok) throw new Error(data.detail || "Не удалось отсортировать Excel");
+    state.lastValidation = data;
+    state.lastJob = { ...(state.lastJob || {}), status: "validated", validation: data, build: null };
+    state.canBuild = data.can_build;
+    renderModePanels();
+    renderValidation(data);
+    setStep("order");
+    showToast("Столбцы отсортированы по возрастанию");
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    renderExcelState();
+    updateHeader();
+  }
+}
+
+function registrationDocumentSortValue(document) {
+  const stem = String(document.original_name || "").replace(/\.[^.]+$/, "");
+  const matches = [...stem.matchAll(/([A-Za-zА-Яа-яЁё]{1,5}\s*-?\s*\d+(?:-\d+)?)/g)];
+  return matches.at(-1)?.[1]?.replace(/\s+/g, "") || stem;
+}
+
+function sortRegistrationNaturally() {
+  const numbers = registrationExternalNumbers();
+  if (numbers.length) {
+    els.registrationExternalInput.value = naturalSortValues(numbers).join("\n");
+    state.registrationDocumentOrder = [];
+    updateRegistrationExternalCount();
+  } else {
+    const documents = [...(state.lastJob?.documents || [])];
+    state.registrationDocumentOrder = documents
+      .map((document, index) => ({ document, index, value: registrationDocumentSortValue(document) }))
+      .sort((left, right) => compareNaturalValues(left.value, right.value) || left.index - right.index)
+      .map((item) => item.document.id);
+  }
+  resetRegistrationPreview();
+  showToast("Порядок новых партий отсортирован по возрастанию");
 }
 
 async function applyStampingToCurrentValidation({ goToCheck = true, toastText = "Метки проверены" } = {}) {
@@ -2439,6 +2553,7 @@ els.clearQueueButton.addEventListener("click", () => {
   state.pendingSkipped = 0;
   state.pendingFolderNames.clear();
   state.excelFile = null;
+  state.excelFiles = [];
   renderPendingQueue();
   renderModePanels();
 });
@@ -2568,12 +2683,19 @@ els.applyStampingButton.addEventListener("click", applyStampingToCurrentValidati
 els.stampPreviewButton.addEventListener("click", showStampPreview);
 
 els.xlsxInput.addEventListener("change", () => {
-  state.excelFile = els.xlsxInput.files[0] || null;
-  renderExcelState();
-  if (state.excelFile) showToast("Excel выбран");
+  addExcelFiles(els.xlsxInput.files);
+  els.xlsxInput.value = "";
 });
 
 els.validateExcelButton.addEventListener("click", validateExcelJob);
+els.sortExcelButton.addEventListener("click", sortExcelGroupsNaturally);
+els.clearExcelFilesButton.addEventListener("click", () => {
+  state.excelFiles = [];
+  state.excelFile = null;
+  invalidateExcelValidation();
+  renderExcelState();
+  renderUploadSummary(state.lastJob);
+});
 [
   els.registrationStartPartyInput,
   els.registrationYearInput,
@@ -2602,6 +2724,7 @@ els.registrationExternalTxtInput.addEventListener("change", async () => {
   showToast("Список № в в/ч №522 TXT загружен");
 });
 els.registrationExternalXlsxInput.addEventListener("change", handleRegistrationExternalXlsxUpload);
+els.sortRegistrationButton.addEventListener("click", sortRegistrationNaturally);
 els.clearRegistrationExternalButton.addEventListener("click", () => {
   els.registrationExternalInput.value = "";
   els.registrationExternalWarnings.innerHTML = "";

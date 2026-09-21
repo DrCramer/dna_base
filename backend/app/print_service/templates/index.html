@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Порядок печати DOCX</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/print/static/styles.css?v=20260920-auto-numbering" />
+    <link rel="stylesheet" href="/print/static/styles.css?v=20260921-excel-order" />
   </head>
   <body
     class="{% if embedded %}embedded{% endif %}"
@@ -73,7 +73,7 @@
             </ol>
           </div>
           <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="Загрузить документы">
-            <input id="fileInput" type="file" multiple accept=".docx,.zip,.xlsx" />
+            <input id="fileInput" type="file" multiple accept=".docx,.zip,.xlsx,.xls" />
             <input id="folderInput" type="file" webkitdirectory directory multiple />
             <strong>Перетащите DOCX, ZIP или папки сюда</strong>
             <span>Выборы накапливаются до загрузки</span>
@@ -181,18 +181,28 @@
         <div id="excelModePanel" class="mode-panel" hidden>
           <div class="panel-head">
             <div>
-              <h3>1. Загрузите Excel-файл с порядком</h3>
+              <h3>Загрузите Excel-файлы с порядком</h3>
               <p>Для каждого непустого столбца будет создан отдельный PDF.</p>
             </div>
-            <label class="file-button">
-              <input id="xlsxInput" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
-              Выбрать XLSX
-            </label>
+            <div class="inline-actions">
+              <label class="file-button">
+                <input id="xlsxInput" type="file" multiple accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" />
+                Добавить Excel-файлы
+              </label>
+              <button id="clearExcelFilesButton" class="secondary" type="button" hidden>Очистить</button>
+            </div>
           </div>
-          <div id="excelFileState" class="empty-state">Excel-файл ещё не выбран.</div>
+          <div id="excelFileState" class="empty-state">Excel-файлы ещё не выбраны.</div>
+          <details id="excelFilesDetails" class="file-details" hidden>
+            <summary>Показать файлы</summary>
+            <div id="excelFilesList" class="file-summary-list"></div>
+          </details>
           <div class="input-footer">
             <span id="excelModeHint">После выбора файла можно проверить столбцы.</span>
-            <button id="validateExcelButton" type="button" disabled>Проверить Excel</button>
+            <div class="inline-actions">
+              <button id="sortExcelButton" class="secondary" type="button" disabled title="Пример: ии2 → ии10 → ии100">Сортировать</button>
+              <button id="validateExcelButton" type="button" disabled>Проверить Excel</button>
+            </div>
           </div>
         </div>
 
@@ -245,9 +255,10 @@
                   TXT
                 </label>
                 <label class="file-button secondary">
-                  <input id="registrationExternalXlsxInput" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                  <input id="registrationExternalXlsxInput" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" />
                   Excel
                 </label>
+                <button id="sortRegistrationButton" class="secondary" type="button" title="Пример: ии2 → ии10 → ии100">Сортировать</button>
                 <button id="clearRegistrationExternalButton" class="secondary" type="button">Очистить</button>
               </div>
             </div>
@@ -458,6 +469,6 @@
       </form>
     </dialog>
 
-    <script src="/print/static/app.js?v=20260920-auto-numbering"></script>
+    <script src="/print/static/app.js?v=20260921-excel-order"></script>
   </body>
 </html>
