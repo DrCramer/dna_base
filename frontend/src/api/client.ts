@@ -13,6 +13,12 @@ import type {
   PartyControlReport,
   PerformerStatisticsReport,
   PeriodStatisticsReport,
+  Protocol,
+  ProtocolList,
+  ProtocolObjectList,
+  ProtocolPayload,
+  ProtocolPreview,
+  ProtocolProfile,
   RcsmeFixApplyResponse,
   RcsmeFixPreview,
   RegistrationBulkApplyResponse,
@@ -163,6 +169,28 @@ export const api = {
     request<{ user: User }>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
   logout: () => request('/auth/logout', { method: 'POST' }),
   dashboard: () => request<Dashboard>('/dashboard'),
+  protocolMeta: (protocolDate: string) => request<{ protocol_date: string; suggested_no: number; suggested_name: string }>(`/protocols/meta?protocol_date=${encodeURIComponent(protocolDate)}`),
+  protocolObjects: (filters: { partyIds?: number[]; selectedIds?: number[]; q?: string; objectType?: string; boxNo?: string; quick?: string; limit?: number; offset?: number }) => {
+    const params = reportParams({ party_ids: filters.partyIds?.join(','), selected_ids: filters.selectedIds?.join(','), q: filters.q, object_type: filters.objectType, box_no: filters.boxNo, quick: filters.quick, limit: filters.limit ?? 100, offset: filters.offset ?? 0 })
+    return request<ProtocolObjectList>(`/protocols/objects?${params.toString()}`)
+  },
+  resolveProtocolObjects: (filters: { partyIds?: number[]; selectedIds?: number[]; q?: string; objectType?: string; boxNo?: string; quick?: string }) => {
+    const params = reportParams({ party_ids: filters.partyIds?.join(','), selected_ids: filters.selectedIds?.join(','), q: filters.q, object_type: filters.objectType, box_no: filters.boxNo, quick: filters.quick })
+    return request<{ object_ids: number[]; total: number }>(`/protocols/objects/resolve?${params.toString()}`)
+  },
+  protocolProfiles: (stageType?: string, includeInactive = false) => request<ProtocolProfile[]>(`/protocols/profiles?${reportParams({ stage_type: stageType, include_inactive: includeInactive }).toString()}`),
+  createProtocolProfile: (payload: Omit<ProtocolProfile, 'id' | 'created_at' | 'updated_at'>) => request<ProtocolProfile>('/protocols/profiles', { method: 'POST', body: JSON.stringify(payload) }),
+  updateProtocolProfile: (id: number, payload: Partial<ProtocolProfile>) => request<ProtocolProfile>(`/protocols/profiles/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  previewProtocol: (payload: ProtocolPayload) => request<ProtocolPreview>('/protocols/preview', { method: 'POST', body: JSON.stringify(payload) }),
+  protocols: (filters: Record<string, string | number | null | undefined>) => request<ProtocolList>(`/protocols?${reportParams(filters).toString()}`),
+  protocol: (id: number) => request<Protocol>(`/protocols/${id}`),
+  createProtocol: (payload: ProtocolPayload) => request<Protocol>('/protocols', { method: 'POST', body: JSON.stringify(payload) }),
+  updateProtocol: (id: number, payload: ProtocolPayload) => request<Protocol>(`/protocols/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  finalizeProtocol: (id: number) => request<Protocol>(`/protocols/${id}/finalize`, { method: 'POST' }),
+  reviseProtocol: (id: number) => request<Protocol>(`/protocols/${id}/revision`, { method: 'POST' }),
+  duplicateProtocol: (id: number, copyObjects: boolean) => request<Protocol>(`/protocols/${id}/duplicate`, { method: 'POST', body: JSON.stringify({ copy_objects: copyObjects }) }),
+  archiveProtocol: (id: number) => request<{ id: number; status: string }>(`/protocols/${id}/archive`, { method: 'POST' }),
+  protocolExcelUrl: (id: number) => requestUrl(firstApiBase(), `/protocols/${id}/excel`),
   reportOverview: (filters: Record<string, string | number | boolean | null | undefined>) =>
     request<ReportOverview>(`/reports/overview?${reportParams(filters).toString()}`),
   reportPartyControl: (filters: Record<string, string | number | boolean | null | undefined>) =>

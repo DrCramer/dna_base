@@ -15,6 +15,8 @@ import { SearchPage } from './pages/SearchPage'
 import { EmployeesPage } from './pages/EmployeesPage'
 import { ElectrophoresisImportPage, RegistryImportPage, RtImportPage } from './pages/ImportPage'
 import { WorkSessionsPage } from './pages/WorkSessionsPage'
+import { ProtocolsCreatePage } from './pages/ProtocolsCreatePage'
+import { ProtocolsPage } from './pages/ProtocolsPage'
 
 type ThemeMode = 'auto' | 'light' | 'dark'
 type EffectiveTheme = 'light' | 'dark'
@@ -68,6 +70,9 @@ export function App() {
   const [objectsQuery, setObjectsQuery] = useState('')
   const [partyFilter, setPartyFilter] = useState<string | null>(null)
   const [partySelect, setPartySelect] = useState<{ partyNo: string; caseYear?: number | null } | null>(null)
+  const [protocolId, setProtocolId] = useState<number | null>(null)
+  const [protocolPrintOnOpen, setProtocolPrintOnOpen] = useState(false)
+  const [protocolDirty, setProtocolDirty] = useState(false)
   const [themeMode, setThemeMode] = useState<ThemeMode>(storedThemeMode)
   const [effectiveTheme, setEffectiveTheme] = useState<EffectiveTheme>(() => themeMode === 'auto' ? systemTheme() : themeMode)
   const [uiScale, setUiScale] = useState(storedUiScale)
@@ -173,6 +178,12 @@ export function App() {
   function changeUiScale(direction: -1 | 1) {
     setUiScale((value) => Math.min(maxUiScale, Math.max(minUiScale, Math.round((value + direction * uiScaleStep) * 10) / 10)))
   }
+  function navigate(next: string) {
+    if (view === 'protocol-create' && protocolDirty && next !== view && !window.confirm('Есть несохранённые изменения. Выйти без сохранения?')) return
+    setProtocolDirty(false)
+    setObjectId(null)
+    setView(next)
+  }
   const openParty = useCallback((partyNo: string) => {
     if (view === 'objects' && partyFilter === partyNo && objectId === null && objectsQuery === '') return
     setObjectId(null)
@@ -206,6 +217,8 @@ export function App() {
   else if (view === 'parties') page = <PartiesPage user={user} onObjectOpen={setObjectId} onReportsOpen={openReports} initialPartyNo={partySelect?.partyNo} initialPartyYear={partySelect?.caseYear} onInitialPartyHandled={() => setPartySelect(null)} />
   else if (view === 'objects') page = <ObjectsPage initialQuery={objectsQuery} partyFilter={partyFilter} onQueryChange={setObjectsQuery} onPartyFilterChange={setPartyFilter} onOpen={setObjectId} onPartyOpen={openParty} />
   else if (view === 'work-sessions') page = <WorkSessionsPage user={user} />
+  else if (view === 'protocol-create') page = <ProtocolsCreatePage user={user} protocolId={protocolId} printOnOpen={protocolPrintOnOpen} onPrintHandled={() => setProtocolPrintOnOpen(false)} onProtocolId={setProtocolId} onDirtyChange={setProtocolDirty} onBack={() => { setProtocolDirty(false); setProtocolPrintOnOpen(false); setProtocolId(null); setView('protocols') }} />
+  else if (view === 'protocols') page = <ProtocolsPage user={user} onCreate={() => { setProtocolPrintOnOpen(false); setProtocolId(null); setView('protocol-create') }} onOpen={(id) => { setProtocolPrintOnOpen(false); setProtocolId(id); setView('protocol-create') }} onPrint={(id) => { setProtocolPrintOnOpen(true); setProtocolId(id); setView('protocol-create') }} />
   else if (view === 'search') page = <SearchPage onObjectOpen={setObjectId} onPartyOpen={openPartyInParties} />
   else if (view === 'reports') page = <ReportsPage user={user} onPartyOpen={openPartyInParties} />
   else if (view === 'employees') page = <EmployeesPage user={user} />
@@ -218,8 +231,11 @@ export function App() {
     <Shell
       user={user}
       active={view}
-      onNavigate={(next) => { setObjectId(null); setView(next) }}
-      onLogout={() => logout.mutate()}
+      onNavigate={navigate}
+      onLogout={() => {
+        if (view === 'protocol-create' && protocolDirty && !window.confirm('Есть несохранённые изменения. Выйти без сохранения?')) return
+        logout.mutate()
+      }}
       theme={effectiveTheme}
       themeMode={themeMode}
       onTheme={() => setThemeMode((mode) => nextThemeMode(mode))}

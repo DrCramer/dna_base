@@ -779,3 +779,159 @@ export interface RcsmeFixApplyResponse {
   skipped: number
   conflicts: number
 }
+
+export type ProtocolStageType = 'dna_extraction' | 'realtime' | 'pcr' | 'electrophoresis'
+export type ProtocolStatus = 'draft' | 'final' | 'archived'
+
+export interface ProtocolProfile {
+  id: number
+  stage_type: ProtocolStageType
+  name: string
+  reference_item_id: number | null
+  active: boolean
+  plate_rules_json: Record<string, unknown>
+  reagent_config_json: Record<string, unknown>
+  instrument_config_json: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface ProtocolObject {
+  id: number
+  party_id: number | null
+  party_no: string | null
+  case_year: number | null
+  rcsme_reg_no: string | null
+  decree_no: string | null
+  external_military_no: string | null
+  object_type: string | null
+  box_no: string | null
+  has_rt: boolean
+  stage_types: string[]
+}
+
+export interface ProtocolObjectList {
+  items: ProtocolObject[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface ProtocolStageSettings {
+  stage_type: ProtocolStageType
+  enabled: boolean
+  work_date: string | null
+  profile_id: number | null
+  kit_name: string | null
+  sequencer_name: string | null
+  comment: string | null
+  performer_ids: number[]
+  settings: Record<string, unknown>
+}
+
+export interface ProtocolPlateRules {
+  rows: 8
+  columns: 12
+  fill_order: 'column'
+  ladder_enabled: boolean
+  ladder_wells: string[]
+  pc_enabled: boolean
+  nc_enabled: boolean
+}
+
+export interface ProtocolPayload {
+  protocol_date: string
+  protocol_no: number
+  name: string
+  comment: string | null
+  object_ids: number[]
+  stages: ProtocolStageSettings[]
+  plate_rules: ProtocolPlateRules
+  dilution: {
+    enabled: boolean
+    target_concentration: number
+    source_dna_volume: number
+    dilution_one_volume: number
+    threshold: number
+  }
+}
+
+export interface ProtocolWell {
+  plate_index: number
+  well: string
+  kind: 'sample' | 'ladder' | 'pc' | 'nc' | 'standard' | 'empty'
+  object_id: number | null
+  display_name: string | null
+  label: string | null
+  order_index: number
+  object_snapshot?: Record<string, unknown> | null
+}
+
+export interface ProtocolPlate {
+  plate_index: number
+  sample_count: number
+  wells: ProtocolWell[]
+}
+
+export interface ProtocolLayout {
+  layout_key: string
+  capacity: number
+  rules: Record<string, unknown>
+  plates: ProtocolPlate[]
+  warnings: string[]
+}
+
+export interface ProtocolPreview {
+  selected_count: number
+  capacity: number
+  max_capacity: number
+  objects: Array<Record<string, unknown>>
+  stages: Array<Record<string, unknown>>
+  layouts: { source: ProtocolLayout; pcr: ProtocolLayout }
+  calculations: {
+    pcr: Array<Record<string, unknown>>
+    electrophoresis: Record<string, unknown>
+  }
+  dilutions: Array<Record<string, unknown>>
+  warnings: string[]
+  snapshot: Record<string, unknown>
+}
+
+export interface ProtocolSummary {
+  id: number
+  series_key: string
+  protocol_no: number
+  protocol_date: string
+  name: string
+  status: ProtocolStatus
+  revision_no: number
+  object_count: number
+  party_numbers: string[]
+  stage_types: string[]
+  author: string | null
+  updated_at: string
+}
+
+export interface ProtocolList {
+  items: ProtocolSummary[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface Protocol {
+  id: number
+  series_key: string
+  protocol_no: number
+  protocol_date: string
+  name: string
+  status: ProtocolStatus
+  revision_no: number
+  comment: string | null
+  created_by_user_id: number | null
+  created_at: string
+  updated_at: string
+  finalized_at: string | null
+  snapshot: Record<string, unknown>
+  revisions: Array<{ id: number; revision_no: number; status: ProtocolStatus; updated_at: string }>
+}

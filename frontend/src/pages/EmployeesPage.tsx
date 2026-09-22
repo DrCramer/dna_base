@@ -3,7 +3,7 @@ import { Check, Plus, Search, X } from 'lucide-react'
 import type { KeyboardEvent } from 'react'
 import { useState } from 'react'
 import { api } from '../api/client'
-import type { Employee, ReferenceItem, User } from '../api/types'
+import type { Employee, ProtocolProfile, ProtocolStageType, ReferenceItem, User } from '../api/types'
 import { EmptyState, ErrorState, LoadingState, PageHeader } from '../components/ui'
 
 const categories = [
@@ -34,7 +34,7 @@ function categoryLabel(value: string) {
 
 export function EmployeesPage({ user }: { user: User }) {
   const queryClient = useQueryClient()
-  const [tab, setTab] = useState<'employees' | 'references'>('employees')
+  const [tab, setTab] = useState<'employees' | 'references' | 'profiles'>('employees')
   const [q, setQ] = useState('')
   const [fullName, setFullName] = useState('')
   const [shortName, setShortName] = useState('')
@@ -50,6 +50,11 @@ export function EmployeesPage({ user }: { user: User }) {
   const [showInactiveEmployees, setShowInactiveEmployees] = useState(false)
   const [showInactiveReferences, setShowInactiveReferences] = useState(false)
   const [roleFilter, setRoleFilter] = useState('all')
+  const [profileStage, setProfileStage] = useState<ProtocolStageType>('pcr')
+  const [profileName, setProfileName] = useState('')
+  const [profileEdit, setProfileEdit] = useState<ProtocolProfile | null>(null)
+  const [profileReagents, setProfileReagents] = useState('{}')
+  const [profileInstruments, setProfileInstruments] = useState('{}')
   const canEdit = user.role !== 'viewer'
   const employees = useQuery({
     queryKey: ['employees', q, roleFilter, showInactiveEmployees],
@@ -59,6 +64,11 @@ export function EmployeesPage({ user }: { user: User }) {
   const references = useQuery({
     queryKey: ['reference-items', category, refQ, showInactiveReferences],
     queryFn: () => api.referenceItems(category, refQ, showInactiveReferences),
+    staleTime: 30_000
+  })
+  const profiles = useQuery({
+    queryKey: ['protocol-profiles', 'admin'],
+    queryFn: () => api.protocolProfiles(undefined, true),
     staleTime: 30_000
   })
   function refreshEmployeeData() {
@@ -103,6 +113,27 @@ export function EmployeesPage({ user }: { user: User }) {
     onSuccess: () => refreshReferenceData(),
     onError: (error) => setReferenceError(error instanceof Error ? error.message : 'Не удалось сохранить значение')
   })
+  const createProfile = useMutation({
+    mutationFn: () => api.createProtocolProfile({ stage_type: profileStage, name: profileName.trim(), reference_item_id: null, active: true, plate_rules_json: {}, reagent_config_json: {}, instrument_config_json: {} }),
+    onSuccess: () => { setProfileName(''); queryClient.invalidateQueries({ queryKey: ['protocol-profiles'] }) }
+  })
+  const updateProfile = useMutation({
+    mutationFn: ({ id, patch }: { id: number; patch: Partial<ProtocolProfile> }) => api.updateProtocolProfile(id, patch),
+    onSuccess: () => { setProfileEdit(null); queryClient.invalidateQueries({ queryKey: ['protocol-profiles'] }) }
+  })
+  function editProfile(item: ProtocolProfile) {
+    setProfileEdit(item)
+    setProfileReagents(JSON.stringify(item.reagent_config_json, null, 2))
+    setProfileInstruments(JSON.stringify(item.instrument_config_json, null, 2))
+  }
+  function saveProfileConfig() {
+    if (!profileEdit) return
+    try {
+      updateProfile.mutate({ id: profileEdit.id, patch: { reagent_config_json: JSON.parse(profileReagents), instrument_config_json: JSON.parse(profileInstruments) } })
+    } catch {
+      setReferenceError('Конфигурация профиля должна быть корректным JSON')
+    }
+  }
   function toggleCreateStage(stage: string) {
     setStageRoles((prev) => prev.includes(stage) ? prev.filter((item) => item !== stage) : [...prev, stage])
   }
@@ -144,6 +175,7 @@ export function EmployeesPage({ user }: { user: User }) {
       <div className="tabs">
         <button className={tab === 'employees' ? 'active' : ''} onClick={() => setTab('employees')}>Сотрудники</button>
         <button className={tab === 'references' ? 'active' : ''} onClick={() => setTab('references')}>Реактивы / значения</button>
+        <button className={tab === 'profiles' ? 'active' : ''} onClick={() => setTab('profiles')}>Профили протоколов</button>
       </div>
       {tab === 'employees' ? (
         <section className="section">
@@ -260,7 +292,7 @@ export function EmployeesPage({ user }: { user: User }) {
             )}
           </div>
         </section>
-      ) : (
+      ) : tab === 'references' ? (
         <section className="section">
           <h2>Реактивы / значения</h2>
           <div className="toolbar">
@@ -354,6 +386,15 @@ export function EmployeesPage({ user }: { user: User }) {
               <EmptyState title="Значения не найдены">Проверьте категорию, поиск или фильтр отключённых значений.</EmptyState>
             )}
           </div>
+        </section>
+      ) : (
+        <section className="section">
+          <div className="section-head"><div><h2>Профили PCR / Фореза</h2><p>Рецептуры и параметры приборов из единого Excel-протокола.</p></div></div>
+          {user.role === 'admin' ? <div className="reference-create-row protocol-profile-create"><select value={profileStage} onChange={(event) => setProfileStage(event.target.value as ProtocolStageType)}><option value="pcr">ПЦР</option><option value="electrophoresis">Форез</option></select><input value={profileName} onChange={(event) => setProfileName(event.target.value)} placeholder="Название профиля" /><span /><button className="icon-button" disabled={!profileName.trim() || createProfile.isPending} onClick={() => createProfile.mutate()}><Plus size={18} />Добавить</button></div> : null}
+          {profiles.isLoading ? <LoadingState title="Загрузка профилей..." rows={5} /> : null}
+          {profiles.isError ? <ErrorState error={profiles.error} onRetry={() => profiles.refetch()} /> : null}
+          <div className="reference-table-wrap"><table className="reference-table"><thead><tr><th>Этап</th><th>Название</th><th>Рецептура</th><th>Параметры прибора</th><th>Активен</th><th /></tr></thead><tbody>{(profiles.data || []).map((item) => <tr key={item.id} className={!item.active ? 'is-inactive' : ''}><td>{item.stage_type === 'pcr' ? 'ПЦР' : 'Форез'}</td><td><strong>{item.name}</strong></td><td>{Object.keys(item.reagent_config_json).length} параметров</td><td>{Object.values(item.instrument_config_json).filter((value) => value !== null).length} параметров</td><td className="center-cell"><input type="checkbox" checked={item.active} disabled={user.role !== 'admin'} onChange={() => updateProfile.mutate({ id: item.id, patch: { active: !item.active } })} /></td><td>{user.role === 'admin' ? <button type="button" className="tiny-button" onClick={() => editProfile(item)}>Настроить</button> : <span className="muted-cell">только чтение</span>}</td></tr>)}</tbody></table></div>
+          {profileEdit ? <div className="modal-backdrop" onMouseDown={() => setProfileEdit(null)}><div className="modal protocol-profile-modal" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><h2>{profileEdit.name}</h2><label>Рецептура<textarea rows={12} value={profileReagents} onChange={(event) => setProfileReagents(event.target.value)} /></label><label>Параметры прибора<textarea rows={12} value={profileInstruments} onChange={(event) => setProfileInstruments(event.target.value)} /></label>{referenceError ? <div className="alert danger">{referenceError}</div> : null}<div className="modal-actions"><button className="icon-button" onClick={() => setProfileEdit(null)}>Отмена</button><button className="primary compact" onClick={saveProfileConfig} disabled={updateProfile.isPending}><Check size={17} />Сохранить</button></div></div></div> : null}
         </section>
       )}
     </div>

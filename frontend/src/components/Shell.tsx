@@ -1,4 +1,4 @@
-import { BarChart3, ChevronDown, ChevronRight, ClipboardList, Database, FileDown, FileText, Home, LogOut, Minus, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Plus, Printer, RotateCcw, Search, Sun, Upload, Users, Waves } from 'lucide-react'
+import { BarChart3, ChevronDown, ChevronRight, ClipboardList, Database, FileDown, FilePlus2, FileStack, FileText, Home, LogOut, Minus, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Plus, Printer, RotateCcw, Search, Sun, Upload, Users, Waves } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { User } from '../api/types'
@@ -29,7 +29,9 @@ export function Shell({ user, active, onNavigate, onLogout, theme, themeMode, on
   const canEdit = user.role !== 'viewer'
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(storedSidebarCollapsed)
   const importViews = ['registry-import', 'rt-import', 'electrophoresis-import']
+  const protocolViews = ['protocol-create', 'protocols']
   const [isImportOpen, setIsImportOpen] = useState(() => importViews.includes(active))
+  const [isProtocolsOpen, setIsProtocolsOpen] = useState(() => protocolViews.includes(active))
   const ThemeIcon = themeMode === 'auto' ? Monitor : theme === 'light' ? Moon : Sun
   const themeLabel = themeMode === 'auto' ? 'Тема: авто' : theme === 'light' ? 'Тема: светлая' : 'Тема: тёмная'
   const CollapseIcon = isSidebarCollapsed ? PanelLeftOpen : PanelLeftClose
@@ -39,6 +41,9 @@ export function Shell({ user, active, onNavigate, onLogout, theme, themeMode, on
   }, [isSidebarCollapsed])
   useEffect(() => {
     if (importViews.includes(active)) setIsImportOpen(true)
+  }, [active])
+  useEffect(() => {
+    if (protocolViews.includes(active)) setIsProtocolsOpen(true)
   }, [active])
   const workItems = [
     { id: 'dashboard', label: 'Главная', icon: Home, visible: true },
@@ -60,7 +65,9 @@ export function Shell({ user, active, onNavigate, onLogout, theme, themeMode, on
     { id: 'electrophoresis-import', label: 'Форез', icon: FileText }
   ]
   const ImportToggleIcon = isImportOpen ? ChevronDown : ChevronRight
+  const ProtocolToggleIcon = isProtocolsOpen ? ChevronDown : ChevronRight
   const isImportActive = importViews.includes(active)
+  const isProtocolsActive = protocolViews.includes(active)
   function toggleImportGroup() {
     if (isSidebarCollapsed) {
       setIsSidebarCollapsed(false)
@@ -68,6 +75,14 @@ export function Shell({ user, active, onNavigate, onLogout, theme, themeMode, on
       return
     }
     setIsImportOpen((value) => !value)
+  }
+  function toggleProtocolsGroup() {
+    if (isSidebarCollapsed) {
+      setIsSidebarCollapsed(false)
+      setIsProtocolsOpen(true)
+      return
+    }
+    setIsProtocolsOpen((value) => !value)
   }
   return (
     <div className={`app-shell${isSidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
@@ -101,6 +116,15 @@ export function Shell({ user, active, onNavigate, onLogout, theme, themeMode, on
               </button>
             )
           })}
+          <div className={`sidebar-nav-group${isProtocolsOpen ? ' is-open' : ''}${isProtocolsActive ? ' is-active' : ''}`}>
+            <button type="button" className={`sidebar-group-toggle${isProtocolsActive ? ' active' : ''}`} onClick={toggleProtocolsGroup} title="Протоколы" aria-expanded={isProtocolsOpen && !isSidebarCollapsed}>
+              <FileStack size={18} /><span>Протоколы</span><ProtocolToggleIcon className="sidebar-group-chevron" size={16} />
+            </button>
+            {isProtocolsOpen && !isSidebarCollapsed ? <div className="sidebar-subnav">
+              {canEdit ? <button className={active === 'protocol-create' ? 'active' : ''} onClick={() => onNavigate('protocol-create')} title="Создать протокол"><FilePlus2 size={16} /><span>Создать</span></button> : null}
+              <button className={active === 'protocols' ? 'active' : ''} onClick={() => onNavigate('protocols')} title="Сохранённые протоколы"><FileText size={16} /><span>Сохранённые</span></button>
+            </div> : null}
+          </div>
           <span className="sidebar-caption">Контроль</span>
           {controlItems.filter((item) => item.visible).map((item) => {
             const Icon = item.icon

@@ -15,6 +15,7 @@ from app.print_service.main import router as print_router
 from app.print_service.services.cleanup_service import cleanup_loop as print_cleanup_loop
 from app.services.auth import ensure_dev_users
 from app.services.files import ensure_storage_dirs
+from app.services.protocol_profile_seed import seed_protocol_profiles
 
 
 @asynccontextmanager
@@ -25,6 +26,7 @@ async def lifespan(_app: FastAPI):
     try:
         async with SessionLocal() as session:
             await ensure_dev_users(session)
+            await seed_protocol_profiles(session)
     except Exception:
         # The database may not be migrated yet; Docker entrypoint runs Alembic first.
         pass

@@ -577,3 +577,194 @@ class AuditLog(Base):
     before_json: Mapped[dict[str, Any] | None] = mapped_column(json_type)
     after_json: Mapped[dict[str, Any] | None] = mapped_column(json_type)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class ProtocolStageProfile(Base, TimestampMixin):
+    __tablename__ = "protocol_stage_profiles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    stage_type: Mapped[str] = mapped_column(String(80), index=True)
+    name: Mapped[str] = mapped_column(String(255), index=True)
+    reference_item_id: Mapped[int | None] = mapped_column(
+        ForeignKey("reference_items.id", ondelete="SET NULL"), index=True
+    )
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    plate_rules_json: Mapped[dict[str, Any]] = mapped_column(json_type, default=dict)
+    reagent_config_json: Mapped[dict[str, Any]] = mapped_column(json_type, default=dict)
+    instrument_config_json: Mapped[dict[str, Any]] = mapped_column(json_type, default=dict)
+
+    reference_item: Mapped[ReferenceItem | None] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint("stage_type", "name", name="uq_protocol_stage_profiles_stage_name"),
+    )
+
+
+class LabProtocol(Base, TimestampMixin):
+    __tablename__ = "lab_protocols"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    series_key: Mapped[str] = mapped_column(String(36), index=True)
+    protocol_no: Mapped[int] = mapped_column(Integer, index=True)
+    protocol_date: Mapped[date] = mapped_column(Date, index=True)
+    name: Mapped[str] = mapped_column(String(255), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="draft", index=True)
+    revision_no: Mapped[int] = mapped_column(Integer, default=1)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    comment: Mapped[str | None] = mapped_column(Text)
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    snapshot_json: Mapped[dict[str, Any]] = mapped_column(json_type, default=dict)
+
+    creator: Mapped[User | None] = relationship()
+    stages: Mapped[list["LabProtocolStage"]] = relationship(
+        back_populates="protocol", cascade="all, delete-orphan"
+    )
+    objects: Mapped[list["LabProtocolObject"]] = relationship(
+        back_populates="protocol", cascade="all, delete-orphan"
+    )
+    wells: Mapped[list["LabProtocolWell"]] = relationship(
+        back_populates="protocol", cascade="all, delete-orphan"
+    )
+    exports: Mapped[list["ProtocolExport"]] = relationship(
+        back_populates="protocol", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("series_key", "revision_no", name="uq_lab_protocols_series_revision"),
+        UniqueConstraint(
+            "protocol_date", "protocol_no", "revision_no", name="uq_lab_protocols_date_no_revision"
+        ),
+        Index("ix_lab_protocols_current_status", "is_current", "status"),
+    )
+
+
+class LabProtocolStage(Base):
+    __tablename__ = "lab_protocol_stages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    protocol_id: Mapped[int] = mapped_column(
+        ForeignKey("lab_protocols.id", ondelete="CASCADE"), index=True
+    )
+    stage_type: Mapped[str] = mapped_column(String(80), index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    work_date: Mapped[date | None] = mapped_column(Date, index=True)
+    profile_id: Mapped[int | None] = mapped_column(
+        ForeignKey("protocol_stage_profiles.id", ondelete="SET NULL"), index=True
+    )
+    kit_name_snapshot: Mapped[str | None] = mapped_column(String(255), index=True)
+    sequencer_name_snapshot: Mapped[str | None] = mapped_column(String(255), index=True)
+    comment: Mapped[str | None] = mapped_column(Text)
+    settings_json: Mapped[dict[str, Any]] = mapped_column(json_type, default=dict)
+
+    protocol: Mapped[LabProtocol] = relationship(back_populates="stages")
+    profile: Mapped[ProtocolStageProfile | None] = relationship()
+    performers: Mapped[list["LabProtocolStagePerformer"]] = relationship(
+        back_populates="protocol_stage", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (UniqueConstraint("protocol_id", "stage_type", name="uq_lab_protocol_stages_once"),)
+
+
+class LabProtocolStagePerformer(Base):
+    __tablename__ = "lab_protocol_stage_performers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    protocol_stage_id: Mapped[int] = mapped_column(
+        ForeignKey("lab_protocol_stages.id", ondelete="CASCADE"), index=True
+    )
+    employee_id: Mapped[int | None] = mapped_column(
+        ForeignKey("employees.id", ondelete="SET NULL"), index=True
+    )
+    display_name_snapshot: Mapped[str] = mapped_column(String(255), index=True)
+    role: Mapped[str | None] = mapped_column(String(120))
+    order_index: Mapped[int] = mapped_column(Integer, default=0)
+
+    protocol_stage: Mapped[LabProtocolStage] = relationship(back_populates="performers")
+    employee: Mapped[Employee | None] = relationship()
+
+
+class LabProtocolObject(Base):
+    __tablename__ = "lab_protocol_objects"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    protocol_id: Mapped[int] = mapped_column(
+        ForeignKey("lab_protocols.id", ondelete="CASCADE"), index=True
+    )
+    object_id: Mapped[int | None] = mapped_column(
+        ForeignKey("objects.id", ondelete="SET NULL"), index=True
+    )
+    party_id: Mapped[int | None] = mapped_column(
+        ForeignKey("parties.id", ondelete="SET NULL"), index=True
+    )
+    order_index: Mapped[int] = mapped_column(Integer)
+    rcsme_no_snapshot: Mapped[str | None] = mapped_column(String(120), index=True)
+    decision_no_snapshot: Mapped[str | None] = mapped_column(String(120), index=True)
+    military_no_snapshot: Mapped[str | None] = mapped_column(String(255), index=True)
+    object_type_snapshot: Mapped[str | None] = mapped_column(String(255))
+    party_no_snapshot: Mapped[str | None] = mapped_column(String(80), index=True)
+    box_no_snapshot: Mapped[str | None] = mapped_column(String(80))
+    snapshot_json: Mapped[dict[str, Any]] = mapped_column(json_type, default=dict)
+
+    protocol: Mapped[LabProtocol] = relationship(back_populates="objects")
+    object: Mapped[RegistryObject | None] = relationship()
+    party: Mapped[Party | None] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint("protocol_id", "order_index", name="uq_lab_protocol_objects_order"),
+    )
+
+
+class LabProtocolWell(Base):
+    __tablename__ = "lab_protocol_wells"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    protocol_id: Mapped[int] = mapped_column(
+        ForeignKey("lab_protocols.id", ondelete="CASCADE"), index=True
+    )
+    protocol_stage_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_protocol_stages.id", ondelete="CASCADE"), index=True
+    )
+    layout_key: Mapped[str] = mapped_column(String(80), default="source", index=True)
+    plate_index: Mapped[int] = mapped_column(Integer, default=1)
+    well: Mapped[str] = mapped_column(String(8))
+    kind: Mapped[str] = mapped_column(String(40), index=True)
+    object_id: Mapped[int | None] = mapped_column(
+        ForeignKey("objects.id", ondelete="SET NULL"), index=True
+    )
+    label: Mapped[str | None] = mapped_column(String(255))
+    order_index: Mapped[int] = mapped_column(Integer)
+    snapshot_json: Mapped[dict[str, Any]] = mapped_column(json_type, default=dict)
+
+    protocol: Mapped[LabProtocol] = relationship(back_populates="wells")
+    protocol_stage: Mapped[LabProtocolStage | None] = relationship()
+    object: Mapped[RegistryObject | None] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint(
+            "protocol_id", "layout_key", "plate_index", "well", name="uq_lab_protocol_wells_position"
+        ),
+    )
+
+
+class ProtocolExport(Base):
+    __tablename__ = "protocol_exports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    protocol_id: Mapped[int] = mapped_column(
+        ForeignKey("lab_protocols.id", ondelete="CASCADE"), index=True
+    )
+    stage_type: Mapped[str | None] = mapped_column(String(80), index=True)
+    exporter_key: Mapped[str] = mapped_column(String(120), index=True)
+    filename: Mapped[str] = mapped_column(String(255))
+    mime_type: Mapped[str] = mapped_column(String(120))
+    storage_path: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(json_type, default=dict)
+
+    protocol: Mapped[LabProtocol] = relationship(back_populates="exports")
