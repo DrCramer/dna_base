@@ -802,6 +802,7 @@ export interface ProtocolObject {
   party_no: string | null
   case_year: number | null
   rcsme_reg_no: string | null
+  object_description: string | null
   decree_no: string | null
   external_military_no: string | null
   object_type: string | null
@@ -815,6 +816,13 @@ export interface ProtocolObjectList {
   total: number
   limit: number
   offset: number
+}
+
+export interface ProtocolObjectResolve {
+  object_ids: number[]
+  total: number
+  matched_numbers: string[]
+  missing_numbers: string[]
 }
 
 export interface ProtocolStageSettings {

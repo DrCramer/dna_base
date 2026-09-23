@@ -89,6 +89,7 @@ class ProtocolObjectOut(BaseModel):
     party_no: str | None
     case_year: int | None
     rcsme_reg_no: str | None
+    object_description: str | None
     decree_no: str | None
     external_military_no: str | None
     object_type: str | None
@@ -107,6 +108,8 @@ class ProtocolObjectListOut(BaseModel):
 class ProtocolObjectResolveOut(BaseModel):
     object_ids: list[int]
     total: int
+    matched_numbers: list[str] = Field(default_factory=list)
+    missing_numbers: list[str] = Field(default_factory=list)
 
 
 class ProtocolProfileBase(BaseModel):

@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Check, Download, Eye, FilePenLine, Printer, Save } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { api } from '../api/client'
-import type { Protocol, ProtocolPayload, ProtocolPlateRules, ProtocolPreview, ProtocolStageSettings, User } from '../api/types'
+import type { Protocol, ProtocolPayload, ProtocolPlateRules, ProtocolPreview, ProtocolStageSettings, ProtocolStageType, User } from '../api/types'
 import { ProtocolObjectSelector } from '../components/protocols/ProtocolObjectSelector'
+import { ProtocolPrintDocument } from '../components/protocols/ProtocolPrintDocument'
 import { ProtocolSheet } from '../components/protocols/ProtocolSheet'
 import { ErrorState, LoadingState, PageHeader } from '../components/ui'
 
@@ -55,6 +57,10 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
   const [preview, setPreview] = useState<ProtocolPreview | null>(null)
   const [dirty, setDirty] = useState(false)
   const [showPrintPreview, setShowPrintPreview] = useState(false)
+  const [printSelectionOpen, setPrintSelectionOpen] = useState(false)
+  const [printIntent, setPrintIntent] = useState<'preview' | 'print'>('preview')
+  const [printStageTypes, setPrintStageTypes] = useState<ProtocolStageType[]>(stageTypes)
+  const [autoPrint, setAutoPrint] = useState(false)
   const hydratedId = useRef<number | null>(null)
   const protocol = useQuery({ queryKey: ['protocol', currentId], queryFn: () => api.protocol(currentId as number), enabled: currentId !== null })
   const meta = useQuery({ queryKey: ['protocol-meta', protocolDate], queryFn: () => api.protocolMeta(protocolDate), enabled: currentId === null })
@@ -119,9 +125,18 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
   useEffect(() => () => onDirtyChange(false), [onDirtyChange])
   useEffect(() => {
     if (!printOnOpen || !preview) return
-    setShowPrintPreview(true)
+    setPrintIntent('print')
+    setPrintSelectionOpen(true)
     onPrintHandled()
   }, [onPrintHandled, preview, printOnOpen])
+  useEffect(() => {
+    if (!showPrintPreview || !autoPrint) return
+    const timer = window.setTimeout(() => {
+      setAutoPrint(false)
+      printProtocol()
+    }, 120)
+    return () => window.clearTimeout(timer)
+  }, [autoPrint, showPrintPreview])
 
   const payload = useMemo<ProtocolPayload>(() => ({
     protocol_date: protocolDate,
@@ -163,8 +178,23 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
   }
   function printProtocol() {
     document.body.classList.add('protocol-printing')
+    const cleanup = () => document.body.classList.remove('protocol-printing')
+    window.addEventListener('afterprint', cleanup, { once: true })
     window.print()
-    window.setTimeout(() => document.body.classList.remove('protocol-printing'), 100)
+    window.setTimeout(cleanup, 1000)
+  }
+  function openPrintSelection(intent: 'preview' | 'print') {
+    setPrintIntent(intent)
+    setPrintSelectionOpen(true)
+  }
+  function confirmPrintSelection() {
+    if (!printStageTypes.length) return
+    setPrintSelectionOpen(false)
+    setShowPrintPreview(true)
+    setAutoPrint(printIntent === 'print')
+  }
+  function togglePrintStage(stageType: ProtocolStageType) {
+    setPrintStageTypes((items) => items.includes(stageType) ? items.filter((item) => item !== stageType) : [...items, stageType])
   }
   if (currentId && protocol.isLoading) return <div className="page"><LoadingState title="Загрузка протокола..." rows={8} /></div>
   if (currentId && protocol.isError) return <div className="page"><ErrorState error={protocol.error} onRetry={() => protocol.refetch()} /></div>
@@ -176,8 +206,8 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
         {readOnly && protocol.data?.status === 'final' && user.role !== 'viewer' ? <button type="button" className="icon-button" disabled={revise.isPending} onClick={() => revise.mutate()}><FilePenLine size={17} />Редактировать протокол</button> : null}
         {!readOnly ? <button type="button" className="primary compact" disabled={!selectedIds.length || save.isPending || previewMutation.isPending} onClick={() => save.mutate()}><Save size={17} />Сохранить черновик</button> : null}
         {currentId && protocol.data?.status === 'draft' ? <button type="button" className="icon-button" disabled={dirty || finalize.isPending} title={dirty ? 'Сначала сохраните изменения' : ''} onClick={() => finalize.mutate()}><Check size={17} />Сохранён</button> : null}
-        <button type="button" className="icon-button" disabled={!preview} onClick={() => setShowPrintPreview(true)}><Eye size={17} />Предпросмотр печати</button>
-        <button type="button" className="icon-button" disabled={!preview} onClick={printProtocol}><Printer size={17} />Печать</button>
+        <button type="button" className="icon-button" disabled={!preview} onClick={() => openPrintSelection('preview')}><Eye size={17} />Предпросмотр печати</button>
+        <button type="button" className="icon-button" disabled={!preview} onClick={() => openPrintSelection('print')}><Printer size={17} />Печать</button>
         {currentId ? <a className="icon-button" href={api.protocolExcelUrl(currentId)}><Download size={17} />Скачать Excel</a> : null}
       </div>} />
       {save.error || finalize.error || revise.error || previewMutation.error ? <div className="alert danger">{String((save.error || finalize.error || revise.error || previewMutation.error) instanceof Error ? (save.error || finalize.error || revise.error || previewMutation.error)?.message : 'Не удалось выполнить действие')}</div> : null}
@@ -190,7 +220,14 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
       <div className="protocol-sheet-wrap">
         <ProtocolSheet protocolDate={protocolDate} protocolNo={protocolNo} name={name} selectedCount={selectedIds.length} stages={stages} plateRules={plateRules} preview={preview} profiles={profiles.data || []} employees={employees.data || []} sequencers={sequencers.data || []} readOnly={readOnly} onHeader={(patch) => { if (patch.protocolDate !== undefined) setProtocolDate(patch.protocolDate); if (patch.protocolNo !== undefined) setProtocolNo(patch.protocolNo); if (patch.name !== undefined) setName(patch.name); markDirty() }} onStage={updateStage} onRules={(patch) => { setPlateRules((rules) => ({ ...rules, ...patch })); markDirty() }} />
       </div>
-      {showPrintPreview ? <div className="modal-backdrop protocol-preview-backdrop" onMouseDown={() => setShowPrintPreview(false)}><div className="protocol-preview-modal" role="dialog" aria-modal="true" aria-label="Предпросмотр печати" onMouseDown={(event) => event.stopPropagation()}><div className="protocol-preview-toolbar"><strong>Предпросмотр A4 landscape</strong><button type="button" className="primary compact" onClick={printProtocol}><Printer size={17} />Печать</button><button type="button" className="icon-button" onClick={() => setShowPrintPreview(false)}>Закрыть</button></div><div className="protocol-print-root"><ProtocolSheet protocolDate={protocolDate} protocolNo={protocolNo} name={name} selectedCount={selectedIds.length} stages={stages} plateRules={plateRules} preview={preview} profiles={profiles.data || []} employees={employees.data || []} sequencers={sequencers.data || []} readOnly onHeader={() => undefined} onStage={() => undefined} onRules={() => undefined} /></div></div></div> : null}
+      {printSelectionOpen ? <div className="modal-backdrop" onMouseDown={() => setPrintSelectionOpen(false)}><div className="modal protocol-print-selection" role="dialog" aria-modal="true" aria-label="Что печатать" onMouseDown={(event) => event.stopPropagation()}>
+        <h2>Что печатать</h2>
+        <div className="protocol-print-stage-options">{([
+          ['dna_extraction', 'Выделение'], ['realtime', 'RT'], ['pcr', 'PCR'], ['electrophoresis', 'Форез']
+        ] as Array<[ProtocolStageType, string]>).map(([stageType, label]) => <label key={stageType}><input type="checkbox" checked={printStageTypes.includes(stageType)} onChange={() => togglePrintStage(stageType)} />{label}</label>)}</div>
+        <div className="modal-actions"><button type="button" className="icon-button" onClick={() => setPrintSelectionOpen(false)}>Отмена</button><button type="button" className="primary compact" disabled={!printStageTypes.length} onClick={confirmPrintSelection}>{printIntent === 'print' ? <Printer size={17} /> : <Eye size={17} />}{printIntent === 'print' ? 'Печать' : 'Предпросмотр'}</button></div>
+      </div></div> : null}
+      {showPrintPreview && preview ? createPortal(<div className="modal-backdrop protocol-preview-backdrop" onMouseDown={() => setShowPrintPreview(false)}><div className="protocol-preview-modal" role="dialog" aria-modal="true" aria-label="Предпросмотр печати" onMouseDown={(event) => event.stopPropagation()}><div className="protocol-preview-toolbar"><strong>Предпросмотр A4 landscape · страниц: {printStageTypes.reduce((total, stageType) => total + (stageType === 'pcr' ? preview.layouts.pcr.plates.length : preview.layouts.source.plates.length), 0)}</strong><button type="button" className="primary compact" onClick={printProtocol}><Printer size={17} />Печать</button><button type="button" className="icon-button" onClick={() => setShowPrintPreview(false)}>Закрыть</button></div><div className="protocol-print-root"><ProtocolPrintDocument protocolDate={protocolDate} protocolNo={protocolNo} name={name} stages={stages} selectedStageTypes={printStageTypes} plateRules={plateRules} preview={preview} employees={employees.data || []} /></div></div></div>, document.body) : null}
     </div>
   )
 }

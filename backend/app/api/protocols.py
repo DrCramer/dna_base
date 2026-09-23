@@ -2,7 +2,7 @@ from datetime import date, datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import Integer, String, case, cast, exists, func, or_, select
+from sqlalchemy import Integer, String, and_, case, cast, exists, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -62,11 +62,54 @@ def _csv_ints(value: str | None) -> list[int]:
         raise HTTPException(status_code=400, detail="Некорректный список идентификаторов") from error
 
 
+def _csv_strings(value: str | None) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in (value or "").split(","):
+        normalized = item.strip()
+        key = normalized.casefold()
+        if normalized and key not in seen:
+            result.append(normalized)
+            seen.add(key)
+    return result
+
+
+def _unique_text_options(values: list[str | None]) -> list[str]:
+    options: dict[str, str] = {}
+    for value in values:
+        normalized = (value or "").strip()
+        if normalized:
+            options.setdefault(normalized.casefold(), normalized)
+    return sorted(options.values(), key=str.casefold)
+
+
+def _rcsme_boundary(value: str | None) -> tuple[int, int] | None:
+    if not value or not value.strip():
+        return None
+    parts = value.strip().split("-", 1)
+    if not parts[0].isdigit() or (len(parts) == 2 and (not parts[1] or not parts[1].isdigit())):
+        raise HTTPException(status_code=400, detail="Номер РЦСМЭ в диапазоне должен иметь формат 7600 или 7600-1")
+    return int(parts[0]), int(parts[1]) if len(parts) == 2 else 0
+
+
+def _rcsme_number_parts():
+    value = func.trim(func.coalesce(RegistryObject.rcsme_reg_no, ""))
+    base = func.split_part(value, "-", 1)
+    suffix = func.split_part(value, "-", 2)
+    numeric_base = case((base.op("~")(r"^\d+$"), cast(base, Integer)), else_=None)
+    numeric_suffix = case((suffix.op("~")(r"^\d+$"), cast(suffix, Integer)), else_=0)
+    return numeric_base, numeric_suffix
+
+
 def _object_conditions(
     *,
     party_ids: list[int],
     selected_ids: list[int],
     q: str | None,
+    description: str | None,
+    rcsme_from: str | None,
+    rcsme_to: str | None,
+    numbers: list[str],
     object_type: str | None,
     box_no: str | None,
     quick: str | None,
@@ -85,6 +128,23 @@ def _object_conditions(
                 RegistryObject.external_military_no.ilike(needle),
             )
         )
+    if description and description.strip():
+        conditions.append(
+            func.lower(func.trim(RegistryObject.object_description)) == description.strip().casefold()
+        )
+    lower = _rcsme_boundary(rcsme_from)
+    upper = _rcsme_boundary(rcsme_to)
+    numeric_base, numeric_suffix = _rcsme_number_parts()
+    if lower:
+        conditions.append(
+            or_(numeric_base > lower[0], and_(numeric_base == lower[0], numeric_suffix >= lower[1]))
+        )
+    if upper:
+        conditions.append(
+            or_(numeric_base < upper[0], and_(numeric_base == upper[0], numeric_suffix <= upper[1]))
+        )
+    if numbers:
+        conditions.append(func.lower(func.trim(RegistryObject.rcsme_reg_no)).in_([item.casefold() for item in numbers]))
     if object_type:
         conditions.append(RegistryObject.object_type == object_type)
     if box_no:
@@ -120,6 +180,10 @@ async def _object_rows(
     party_ids: list[int],
     selected_ids: list[int],
     q: str | None,
+    description: str | None,
+    rcsme_from: str | None,
+    rcsme_to: str | None,
+    numbers: list[str],
     object_type: str | None,
     box_no: str | None,
     quick: str | None,
@@ -130,6 +194,10 @@ async def _object_rows(
         party_ids=party_ids,
         selected_ids=selected_ids,
         q=q,
+        description=description,
+        rcsme_from=rcsme_from,
+        rcsme_to=rcsme_to,
+        numbers=numbers,
         object_type=object_type,
         box_no=box_no,
         quick=quick,
@@ -165,6 +233,7 @@ async def _object_rows(
             party_no=obj.party_no,
             case_year=obj.case_year,
             rcsme_reg_no=obj.rcsme_reg_no,
+            object_description=obj.object_description,
             decree_no=obj.decree_no,
             external_military_no=obj.external_military_no,
             object_type=obj.object_type,
@@ -220,6 +289,10 @@ async def list_protocol_objects(
     party_ids: str | None = None,
     selected_ids: str | None = None,
     q: str | None = None,
+    description: str | None = None,
+    rcsme_from: str | None = None,
+    rcsme_to: str | None = None,
+    numbers: str | None = None,
     object_type: str | None = None,
     box_no: str | None = None,
     quick: str | None = None,
@@ -233,6 +306,10 @@ async def list_protocol_objects(
         party_ids=_csv_ints(party_ids),
         selected_ids=_csv_ints(selected_ids),
         q=q,
+        description=description,
+        rcsme_from=rcsme_from,
+        rcsme_to=rcsme_to,
+        numbers=_csv_strings(numbers),
         object_type=object_type,
         box_no=box_no,
         quick=quick,
@@ -242,33 +319,75 @@ async def list_protocol_objects(
     return ProtocolObjectListOut(items=items, total=total, limit=limit, offset=offset)
 
 
+@router.get("/objects/filter-options", response_model=list[str])
+async def protocol_object_filter_options(
+    party_ids: str | None = None,
+    session: AsyncSession = Depends(db_session),
+    _user: User = Depends(current_user),
+):
+    selected_party_ids = _csv_ints(party_ids)
+    if not selected_party_ids:
+        return []
+    descriptions = list(
+        (
+            await session.execute(
+                select(RegistryObject.object_description)
+                .where(
+                    RegistryObject.status != "archived",
+                    RegistryObject.party_id.in_(selected_party_ids),
+                    RegistryObject.object_description.is_not(None),
+                )
+                .distinct()
+                .limit(1000)
+            )
+        ).scalars()
+    )
+    return _unique_text_options(descriptions)
+
+
 @router.get("/objects/resolve", response_model=ProtocolObjectResolveOut)
 async def resolve_protocol_objects(
     party_ids: str | None = None,
     selected_ids: str | None = None,
     q: str | None = None,
+    description: str | None = None,
+    rcsme_from: str | None = None,
+    rcsme_to: str | None = None,
+    numbers: str | None = None,
     object_type: str | None = None,
     box_no: str | None = None,
     quick: str | None = None,
     session: AsyncSession = Depends(db_session),
     _user: User = Depends(current_user),
 ):
+    requested_numbers = _csv_strings(numbers)
     conditions = _object_conditions(
         party_ids=_csv_ints(party_ids),
         selected_ids=_csv_ints(selected_ids),
         q=q,
+        description=description,
+        rcsme_from=rcsme_from,
+        rcsme_to=rcsme_to,
+        numbers=requested_numbers,
         object_type=object_type,
         box_no=box_no,
         quick=quick,
     )
-    ids = list(
-        (
-            await session.execute(
-                select(RegistryObject.id).where(*conditions).order_by(*_object_order()).limit(5000)
-            )
-        ).scalars()
+    rows = (
+        await session.execute(
+            select(RegistryObject.id, RegistryObject.rcsme_reg_no)
+            .where(*conditions)
+            .order_by(*_object_order())
+            .limit(5000)
+        )
+    ).all()
+    matched_keys = {(number or "").strip().casefold() for _, number in rows}
+    return ProtocolObjectResolveOut(
+        object_ids=[object_id for object_id, _ in rows],
+        total=len(rows),
+        matched_numbers=[number for _, number in rows if number],
+        missing_numbers=[number for number in requested_numbers if number.casefold() not in matched_keys],
     )
-    return ProtocolObjectResolveOut(object_ids=ids, total=len(ids))
 
 
 @router.get("/profiles", response_model=list[ProtocolProfileOut])

@@ -13,6 +13,10 @@ test('раздел протоколов открывает создание и �
   await expect(page.getByRole('heading', { name: 'PCR', exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Форез', exact: true })).toBeVisible()
   await expect(page.getByText('Выберите объекты, чтобы построить плашку.')).toBeVisible()
+  await expect(page.getByPlaceholder('№ рег РЦСМЭ от')).toBeVisible()
+  await expect(page.getByPlaceholder('№ рег РЦСМЭ до')).toBeVisible()
+  await expect(page.getByLabel('Описание')).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Вставить список номеров' })).toBeDisabled()
 
   await page.getByRole('button', { name: 'Сохранённые' }).click()
   await expect(page.getByRole('heading', { name: 'Сохранённые протоколы' })).toBeVisible()
