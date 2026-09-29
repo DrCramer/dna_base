@@ -1,12 +1,13 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Check, ChevronLeft, ChevronRight, ClipboardPaste, Search, X } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../api/client'
 import type { Party, ProtocolObject } from '../../api/types'
 import { MultiPartyPicker } from '../ui'
 
 interface Props {
   parties: Party[]
+  year: number
   partyIds: number[]
   selectedIds: number[]
   onPartyIds: (ids: number[]) => void
@@ -30,19 +31,18 @@ function parseNumberList(value: string) {
   return result
 }
 
-export function ProtocolObjectSelector({ parties, partyIds, selectedIds, onPartyIds, onSelectedIds, disabled }: Props) {
+export function ProtocolObjectSelector({ parties, year, partyIds, selectedIds, onPartyIds, onSelectedIds, disabled }: Props) {
   const [query, setQuery] = useState('')
   const [description, setDescription] = useState('')
   const [rcsmeFrom, setRcsmeFrom] = useState('')
   const [rcsmeTo, setRcsmeTo] = useState('')
   const [debounced, setDebounced] = useState({ query: '', rcsmeFrom: '', rcsmeTo: '' })
-  const [objectType, setObjectType] = useState('')
-  const [boxNo, setBoxNo] = useState('')
   const [quick, setQuick] = useState('all')
   const [numberList, setNumberList] = useState<string[]>([])
   const [numberListDraft, setNumberListDraft] = useState('')
   const [numberListOpen, setNumberListOpen] = useState(false)
   const [offset, setOffset] = useState(0)
+  const partyResolveSequence = useRef(0)
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebounced({ query, rcsmeFrom: rcsmeFrom.trim(), rcsmeTo: rcsmeTo.trim() }), 250)
@@ -54,42 +54,47 @@ export function ProtocolObjectSelector({ parties, partyIds, selectedIds, onParty
     || (debounced.rcsmeTo && !boundaryPattern.test(debounced.rcsmeTo))
   )
   const numberListKey = numberList.join('\u0000')
-  useEffect(() => setOffset(0), [partyIds, debounced, description, objectType, boxNo, quick, numberListKey])
+  useEffect(() => setOffset(0), [partyIds, year, debounced, description, quick, numberListKey])
 
   const filterOptions = useQuery({
-    queryKey: ['protocol-object-filter-options', partyIds],
-    queryFn: () => api.protocolObjectFilterOptions(partyIds),
-    enabled: partyIds.length > 0,
+    queryKey: ['protocol-object-filter-options', partyIds, year],
+    queryFn: () => api.protocolObjectFilterOptions(partyIds, year),
     staleTime: 30_000
   })
   useEffect(() => {
     if (description && filterOptions.data && !filterOptions.data.includes(description)) setDescription('')
   }, [description, filterOptions.data])
 
-  const filters = useMemo(() => ({
+  const resolutionFilters = useMemo(() => ({
     partyIds,
+    caseYear: year,
     selectedIds: quick === 'selected' ? selectedIds : undefined,
     q: debounced.query || undefined,
     description: description || undefined,
     rcsmeFrom: debounced.rcsmeFrom || undefined,
     rcsmeTo: debounced.rcsmeTo || undefined,
     numbers: numberList.length ? numberList : undefined,
-    objectType: objectType || undefined,
-    boxNo: boxNo || undefined,
-    quick: quick === 'all' ? undefined : quick,
+    quick: quick === 'all' ? undefined : quick
+  }), [partyIds, year, selectedIds, debounced, description, numberList, quick])
+  const filters = useMemo(() => ({
+    ...resolutionFilters,
     limit: 100,
     offset
-  }), [partyIds, selectedIds, debounced, description, numberList, objectType, boxNo, quick, offset])
-  const objects = useQuery({ queryKey: ['protocol-objects', filters], queryFn: () => api.protocolObjects(filters), enabled: partyIds.length > 0 && !rangeError, placeholderData: (previous) => previous })
-  const resolve = useMutation({ mutationFn: () => api.resolveProtocolObjects(filters), onSuccess: (result) => onSelectedIds(result.object_ids) })
-  const listReport = useQuery({
-    queryKey: ['protocol-object-number-list', filters],
-    queryFn: () => api.resolveProtocolObjects(filters),
-    enabled: partyIds.length > 0 && numberList.length > 0 && !rangeError
+  }), [resolutionFilters, offset])
+  const hasScope = partyIds.length > 0 || numberList.length > 0
+  const objects = useQuery({ queryKey: ['protocol-objects', filters], queryFn: () => api.protocolObjects(filters), enabled: hasScope && !rangeError, placeholderData: (previous) => previous })
+  const allMatching = useQuery({
+    queryKey: ['protocol-object-resolution', resolutionFilters],
+    queryFn: () => api.resolveProtocolObjects(resolutionFilters),
+    enabled: hasScope && !rangeError
   })
+  const selectParties = useMutation({ mutationFn: (ids: number[]) => api.resolveProtocolObjects({ partyIds: ids, caseYear: year }) })
   const selected = useMemo(() => new Set(selectedIds), [selectedIds])
   const visible = objects.data?.items || []
-  const allVisible = visible.length > 0 && visible.every((item) => selected.has(item.id))
+  const matchingIds = allMatching.data?.object_ids || []
+  const allMatchingSelected = matchingIds.length > 0 && matchingIds.every((id) => selected.has(id))
+  const missingNumbers = allMatching.data?.missing_numbers || []
+  const foundNumbers = numberList.length - missingNumbers.length
 
   function toggle(item: ProtocolObject) {
     const next = new Set(selected)
@@ -98,10 +103,23 @@ export function ProtocolObjectSelector({ parties, partyIds, selectedIds, onParty
     onSelectedIds(Array.from(next))
   }
 
-  function toggleVisible() {
+  function toggleMatching() {
     const next = new Set(selected)
-    visible.forEach((item) => allVisible ? next.delete(item.id) : next.add(item.id))
+    matchingIds.forEach((id) => allMatchingSelected ? next.delete(id) : next.add(id))
     onSelectedIds(Array.from(next))
+  }
+
+  function changeParties(ids: number[]) {
+    const sequence = ++partyResolveSequence.current
+    onPartyIds(ids)
+    if (!ids.length) {
+      onSelectedIds([])
+      return
+    }
+    selectParties.mutate(ids, {
+      onSuccess: (result) => { if (sequence === partyResolveSequence.current) onSelectedIds(result.object_ids) },
+      onError: () => { if (sequence === partyResolveSequence.current) onSelectedIds([]) }
+    })
   }
 
   function openNumberList() {
@@ -111,33 +129,31 @@ export function ProtocolObjectSelector({ parties, partyIds, selectedIds, onParty
 
   function applyNumberList() {
     setNumberList(parseNumberList(numberListDraft))
+    setRcsmeFrom('')
+    setRcsmeTo('')
+    setDebounced((current) => ({ ...current, rcsmeFrom: '', rcsmeTo: '' }))
     setNumberListOpen(false)
   }
-
-  const missingNumbers = listReport.data?.missing_numbers || []
-  const foundNumbers = numberList.length - missingNumbers.length
 
   return (
     <div className="protocol-object-selector">
       <div className="protocol-selector-row protocol-selector-primary">
-        <MultiPartyPicker parties={parties} selectedIds={partyIds} onChange={onPartyIds} disabled={disabled} title="Партии протокола" />
+        <MultiPartyPicker parties={parties} selectedIds={partyIds} onChange={changeParties} disabled={disabled || selectParties.isPending} title="Партии протокола" />
         <div className="searchbox compact-search"><Search size={16} /><input value={query} disabled={disabled} onChange={(event) => setQuery(event.target.value)} placeholder="№ РЦСМЭ, постановления, в/ч" /></div>
       </div>
       <div className="protocol-selector-row protocol-selector-filters">
-        <input className="compact-input" value={rcsmeFrom} disabled={disabled} onChange={(event) => setRcsmeFrom(event.target.value)} placeholder="№ рег РЦСМЭ от" />
-        <input className="compact-input" value={rcsmeTo} disabled={disabled} onChange={(event) => setRcsmeTo(event.target.value)} placeholder="№ рег РЦСМЭ до" />
-        <select className="compact-input" aria-label="Описание" value={description} disabled={disabled || !partyIds.length || filterOptions.isLoading} onChange={(event) => setDescription(event.target.value)}>
+        {!numberList.length ? <><input className="compact-input" value={rcsmeFrom} disabled={disabled} onChange={(event) => setRcsmeFrom(event.target.value)} placeholder="№ рег РЦСМЭ от" />
+        <input className="compact-input" value={rcsmeTo} disabled={disabled} onChange={(event) => setRcsmeTo(event.target.value)} placeholder="№ рег РЦСМЭ до" /></> : null}
+        <select className="compact-input" aria-label="Описание" value={description} disabled={disabled || filterOptions.isLoading} onChange={(event) => setDescription(event.target.value)}>
           <option value="">Все описания</option>
           {(filterOptions.data || []).map((option) => <option value={option} key={option}>{option}</option>)}
         </select>
-        <input className="compact-input" value={objectType} disabled={disabled} onChange={(event) => setObjectType(event.target.value)} placeholder="Тип объекта" />
-        <input className="compact-input" value={boxNo} disabled={disabled} onChange={(event) => setBoxNo(event.target.value)} placeholder="Коробка" />
       </div>
       {rangeError ? <div className="protocol-filter-error">Диапазон РЦСМЭ: используйте формат 7600 или 7600-1.</div> : null}
       <div className="protocol-number-list-row">
-        <button type="button" className="tiny-button" disabled={!partyIds.length || disabled} onClick={openNumberList}><ClipboardPaste size={14} />{numberList.length ? 'Изменить список номеров' : 'Вставить список номеров'}</button>
+        <button type="button" className="tiny-button" disabled={disabled} onClick={openNumberList}><ClipboardPaste size={14} />{numberList.length ? 'Изменить список номеров' : 'Вставить список номеров'}</button>
         {numberList.length ? <>
-          <span>{listReport.isError ? 'Не удалось проверить список' : listReport.isFetching ? 'Проверяем список...' : `Найдено: ${foundNumbers} из ${numberList.length}`}</span>
+          <span>{allMatching.isError ? 'Не удалось проверить список' : allMatching.isFetching ? 'Проверяем список...' : `Найдено: ${foundNumbers} из ${numberList.length}`}</span>
           {missingNumbers.length ? <details><summary>Не найдено: {missingNumbers.length}</summary><div>{missingNumbers.join(', ')}</div></details> : null}
           <button type="button" className="tiny-button" disabled={disabled} onClick={() => setNumberList([])}><X size={14} />Очистить список</button>
         </> : null}
@@ -149,13 +165,12 @@ export function ProtocolObjectSelector({ parties, partyIds, selectedIds, onParty
         ].map(([key, label]) => <button type="button" key={key} className={quick === key ? 'active' : ''} onClick={() => setQuick(key)}>{label}</button>)}
       </div>
       <div className="protocol-selection-actions">
-        <label><input type="checkbox" checked={allVisible} disabled={!visible.length || disabled} onChange={toggleVisible} /> Выбрать видимые</label>
-        <button type="button" className="tiny-button" disabled={!partyIds.length || resolve.isPending || disabled || rangeError} onClick={() => resolve.mutate()}><Check size={14} />Выбрать все по текущему фильтру</button>
+        <label><input type="checkbox" checked={allMatchingSelected} disabled={!matchingIds.length || allMatching.isFetching || disabled || rangeError} onChange={toggleMatching} /> Выбрать все</label>
         <button type="button" className="tiny-button" disabled={!selectedIds.length || disabled} onClick={() => onSelectedIds([])}><X size={14} />Очистить</button>
         <strong>Выбрано: {selectedIds.length}</strong>
       </div>
-      {objects.isError ? <div className="alert danger">{objects.error instanceof Error ? objects.error.message : 'Не удалось загрузить объекты'}</div> : null}
-      {!partyIds.length ? <div className="protocol-selector-empty">Сначала выберите одну или несколько партий.</div> : (
+      {objects.isError || allMatching.isError || selectParties.isError ? <div className="alert danger">Не удалось загрузить или выбрать объекты.</div> : null}
+      {!hasScope ? <div className="protocol-selector-empty">Выберите партии или вставьте список номеров.</div> : (
         <div className="protocol-object-table-wrap">
           <table className="protocol-object-table">
             <thead><tr><th /><th>№ рег РЦСМЭ</th><th>Партия</th><th>Описание</th><th>№ постановления</th><th>№ в/ч №522</th><th>Тип объекта</th><th>Коробка</th><th>RT</th></tr></thead>

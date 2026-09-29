@@ -106,6 +106,7 @@ def _rcsme_number_parts():
 
 def _object_conditions(
     *,
+    case_year: int | None = None,
     party_ids: list[int],
     selected_ids: list[int],
     q: str | None,
@@ -118,6 +119,8 @@ def _object_conditions(
     quick: str | None,
 ) -> list:
     conditions = [RegistryObject.status != "archived"]
+    if case_year is not None:
+        conditions.append(RegistryObject.case_year == case_year)
     if party_ids:
         conditions.append(RegistryObject.party_id.in_(party_ids))
     if quick == "selected":
@@ -180,6 +183,7 @@ def _object_order():
 async def _object_rows(
     session: AsyncSession,
     *,
+    case_year: int | None,
     party_ids: list[int],
     selected_ids: list[int],
     q: str | None,
@@ -195,6 +199,7 @@ async def _object_rows(
 ) -> tuple[list[ProtocolObjectOut], int]:
     conditions = _object_conditions(
         party_ids=party_ids,
+        case_year=case_year,
         selected_ids=selected_ids,
         q=q,
         description=description,
@@ -293,6 +298,7 @@ async def protocol_meta(
 @router.get("/objects", response_model=ProtocolObjectListOut)
 async def list_protocol_objects(
     party_ids: str | None = None,
+    case_year: int | None = None,
     selected_ids: str | None = None,
     q: str | None = None,
     description: str | None = None,
@@ -310,6 +316,7 @@ async def list_protocol_objects(
     items, total = await _object_rows(
         session,
         party_ids=_csv_ints(party_ids),
+        case_year=case_year,
         selected_ids=_csv_ints(selected_ids),
         q=q,
         description=description,
@@ -328,21 +335,26 @@ async def list_protocol_objects(
 @router.get("/objects/filter-options", response_model=list[str])
 async def protocol_object_filter_options(
     party_ids: str | None = None,
+    case_year: int | None = None,
     session: AsyncSession = Depends(db_session),
     _user: User = Depends(current_user),
 ):
     selected_party_ids = _csv_ints(party_ids)
-    if not selected_party_ids:
+    conditions = [
+        RegistryObject.status != "archived",
+        RegistryObject.object_description.is_not(None),
+    ]
+    if selected_party_ids:
+        conditions.append(RegistryObject.party_id.in_(selected_party_ids))
+    if case_year is not None:
+        conditions.append(RegistryObject.case_year == case_year)
+    if not selected_party_ids and case_year is None:
         return []
     descriptions = list(
         (
             await session.execute(
                 select(RegistryObject.object_description)
-                .where(
-                    RegistryObject.status != "archived",
-                    RegistryObject.party_id.in_(selected_party_ids),
-                    RegistryObject.object_description.is_not(None),
-                )
+                .where(*conditions)
                 .distinct()
                 .limit(1000)
             )
@@ -354,6 +366,7 @@ async def protocol_object_filter_options(
 @router.get("/objects/resolve", response_model=ProtocolObjectResolveOut)
 async def resolve_protocol_objects(
     party_ids: str | None = None,
+    case_year: int | None = None,
     selected_ids: str | None = None,
     q: str | None = None,
     description: str | None = None,
@@ -369,6 +382,7 @@ async def resolve_protocol_objects(
     requested_numbers = _csv_strings(numbers)
     conditions = _object_conditions(
         party_ids=_csv_ints(party_ids),
+        case_year=case_year,
         selected_ids=_csv_ints(selected_ids),
         q=q,
         description=description,
@@ -384,7 +398,6 @@ async def resolve_protocol_objects(
             select(RegistryObject.id, RegistryObject.rcsme_reg_no)
             .where(*conditions)
             .order_by(*_object_order())
-            .limit(5000)
         )
     ).all()
     matched_keys = {(number or "").strip().casefold() for _, number in rows}

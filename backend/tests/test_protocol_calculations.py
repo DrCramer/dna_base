@@ -1,4 +1,5 @@
 from app.services.protocol_calculations import (
+    aggregate_pcr_reagents,
     calculate_dilution,
     calculate_electrophoresis_reagents,
     calculate_pcr_reagents,
@@ -19,6 +20,13 @@ def test_single_dilution():
     assert result["steps"] == [{"factor": 10.0, "dna_volume": 3, "water_volume": 27.0}]
 
 
+def test_dilution_water_is_always_rounded_up_to_integer():
+    above_integer = calculate_dilution(1.0003333333333333, target_concentration=0.1)
+    exact_integer = calculate_dilution(1, target_concentration=0.1)
+    assert above_integer["steps"][0]["water_volume"] == 28
+    assert exact_integer["steps"][0]["water_volume"] == 27
+
+
 def test_two_sequential_dilutions_above_threshold():
     result = calculate_dilution(1000, target_concentration=0.1, source_dna_volume=3, dilution_one_volume=10, threshold=100)
     assert result["total_factor"] == 10000
@@ -34,11 +42,26 @@ def test_pcr_reagent_formula_matches_excel_overage():
     assert result["components"][2]["total"] is None
 
 
+def test_pcr_reagents_aggregate_all_plates_into_one_total():
+    result = aggregate_pcr_reagents(
+        [{"sample_count": 10}, {"sample_count": 10}],
+        {"master_mix": 5, "taq": "-"},
+    )
+    assert result["sample_count"] == 20
+    assert result["reaction_count"] == 24
+    master_mix = next(item for item in result["components"] if item["key"] == "master_mix")
+    taq = next(item for item in result["components"] if item["key"] == "taq")
+    assert master_mix["per_reaction"] == 5
+    assert master_mix["total"] == 132.0
+    assert taq["per_reaction"] is None
+    assert taq["total"] is None
+
+
 def test_electrophoresis_rounds_to_sequencer_capacity():
     result = calculate_electrophoresis_reagents(64, {"hidi_formamide": 9.5, "ils": 0.5}, "GTZ G16")
-    assert result["loaded_wells"] == 80
+    assert result["loaded_wells"] == 64
     assert result["sequencer_capacity"] == 16
-    assert result["reaction_count"] == 82
+    assert result["reaction_count"] == 66
 
 
 def test_v13_profiles_include_required_systems_and_unavailable_values():

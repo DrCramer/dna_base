@@ -63,7 +63,7 @@ def build_protocol_workbook(snapshot: dict[str, Any]) -> bytes:
 
     calculations = workbook.create_sheet("Расчёты")
     calculations.append(["Этап", "Плашка", "Компонент", "На реакцию", "Всего"])
-    for block in snapshot["calculations"]["pcr"]:
+    for block in snapshot["calculations"].get("pcr", []):
         for component in block["components"]:
             calculations.append(["PCR", block["plate_index"], component["label"], component["per_reaction"], component["total"]])
     for component in snapshot["calculations"]["electrophoresis"]["components"]:
@@ -73,12 +73,12 @@ def build_protocol_workbook(snapshot: dict[str, Any]) -> bytes:
         cell.fill = PatternFill("solid", fgColor="D9EAF7")
 
     dilution = workbook.create_sheet("Dilution")
-    dilution.append(["Лунка", "Объект", "Исх. конц.", "Кон. конц.", "Фактор", "I разведение", "V ДНК", "V воды 1", "II разведение", "V ДНК 1", "V воды 2"])
+    dilution.append(["Плашка", "Лунка", "Объект", "Исх. конц.", "Кон. конц.", "Фактор", "Фактор I", "ДНК I", "H₂O I", "Фактор II", "ДНК II", "H₂O II"])
     for item in snapshot.get("dilutions", []):
         steps = item.get("steps", [])
         first = steps[0] if steps else {}
         second = steps[1] if len(steps) > 1 else {}
-        dilution.append([item.get("well"), item.get("display_name"), item.get("source_concentration"), item.get("target_concentration"), item.get("total_factor"), first.get("factor"), first.get("dna_volume"), first.get("water_volume"), second.get("factor"), second.get("dna_volume"), second.get("water_volume")])
+        dilution.append([item.get("plate_index"), item.get("well"), item.get("display_name"), item.get("source_concentration"), item.get("target_concentration"), item.get("total_factor"), first.get("factor"), first.get("dna_volume"), first.get("water_volume"), second.get("factor"), second.get("dna_volume"), second.get("water_volume")])
     for cell in dilution[1]:
         cell.font = Font(bold=True)
         cell.fill = PatternFill("solid", fgColor="D9EAF7")

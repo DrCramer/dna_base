@@ -171,13 +171,13 @@ export const api = {
   logout: () => request('/auth/logout', { method: 'POST' }),
   dashboard: () => request<Dashboard>('/dashboard'),
   protocolMeta: (protocolDate: string) => request<{ protocol_date: string; suggested_no: number; suggested_name: string }>(`/protocols/meta?protocol_date=${encodeURIComponent(protocolDate)}`),
-  protocolObjects: (filters: { partyIds?: number[]; selectedIds?: number[]; q?: string; description?: string; rcsmeFrom?: string; rcsmeTo?: string; numbers?: string[]; objectType?: string; boxNo?: string; quick?: string; limit?: number; offset?: number }) => {
-    const params = reportParams({ party_ids: filters.partyIds?.join(','), selected_ids: filters.selectedIds?.join(','), q: filters.q, description: filters.description, rcsme_from: filters.rcsmeFrom, rcsme_to: filters.rcsmeTo, numbers: filters.numbers?.join(','), object_type: filters.objectType, box_no: filters.boxNo, quick: filters.quick, limit: filters.limit ?? 100, offset: filters.offset ?? 0 })
+  protocolObjects: (filters: { partyIds?: number[]; caseYear?: number; selectedIds?: number[]; q?: string; description?: string; rcsmeFrom?: string; rcsmeTo?: string; numbers?: string[]; quick?: string; limit?: number; offset?: number }) => {
+    const params = reportParams({ party_ids: filters.partyIds?.join(','), case_year: filters.caseYear, selected_ids: filters.selectedIds?.join(','), q: filters.q, description: filters.description, rcsme_from: filters.rcsmeFrom, rcsme_to: filters.rcsmeTo, numbers: filters.numbers?.join(','), quick: filters.quick, limit: filters.limit ?? 100, offset: filters.offset ?? 0 })
     return request<ProtocolObjectList>(`/protocols/objects?${params.toString()}`)
   },
-  protocolObjectFilterOptions: (partyIds: number[]) => request<string[]>(`/protocols/objects/filter-options?${reportParams({ party_ids: partyIds.join(',') }).toString()}`),
-  resolveProtocolObjects: (filters: { partyIds?: number[]; selectedIds?: number[]; q?: string; description?: string; rcsmeFrom?: string; rcsmeTo?: string; numbers?: string[]; objectType?: string; boxNo?: string; quick?: string }) => {
-    const params = reportParams({ party_ids: filters.partyIds?.join(','), selected_ids: filters.selectedIds?.join(','), q: filters.q, description: filters.description, rcsme_from: filters.rcsmeFrom, rcsme_to: filters.rcsmeTo, numbers: filters.numbers?.join(','), object_type: filters.objectType, box_no: filters.boxNo, quick: filters.quick })
+  protocolObjectFilterOptions: (partyIds: number[], caseYear?: number) => request<string[]>(`/protocols/objects/filter-options?${reportParams({ party_ids: partyIds.join(','), case_year: caseYear }).toString()}`),
+  resolveProtocolObjects: (filters: { partyIds?: number[]; caseYear?: number; selectedIds?: number[]; q?: string; description?: string; rcsmeFrom?: string; rcsmeTo?: string; numbers?: string[]; quick?: string }) => {
+    const params = reportParams({ party_ids: filters.partyIds?.join(','), case_year: filters.caseYear, selected_ids: filters.selectedIds?.join(','), q: filters.q, description: filters.description, rcsme_from: filters.rcsmeFrom, rcsme_to: filters.rcsmeTo, numbers: filters.numbers?.join(','), quick: filters.quick })
     return request<ProtocolObjectResolve>(`/protocols/objects/resolve?${params.toString()}`)
   },
   protocolProfiles: (stageType?: string, includeInactive = false) => request<ProtocolProfile[]>(`/protocols/profiles?${reportParams({ stage_type: stageType, include_inactive: includeInactive }).toString()}`),

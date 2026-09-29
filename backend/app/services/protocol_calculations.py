@@ -42,6 +42,31 @@ def calculate_pcr_reagents(sample_count: int, config: dict[str, Any]) -> dict[st
     return {"sample_count": sample_count, "reaction_count": reactions, "overage_percent": 10, "components": components}
 
 
+def aggregate_pcr_reagents(plates: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]:
+    per_plate = [calculate_pcr_reagents(plate["sample_count"], config) for plate in plates]
+    labels = per_plate[0]["components"] if per_plate else calculate_pcr_reagents(0, config)["components"]
+    components = []
+    for component in labels:
+        totals = [
+            next(item["total"] for item in plate["components"] if item["key"] == component["key"])
+            for plate in per_plate
+        ]
+        components.append(
+            {
+                **component,
+                "total": round(sum(value for value in totals if value is not None), 1)
+                if any(value is not None for value in totals)
+                else None,
+            }
+        )
+    return {
+        "sample_count": sum(plate["sample_count"] for plate in plates),
+        "reaction_count": sum(plate["reaction_count"] for plate in per_plate),
+        "overage_percent": 10,
+        "components": components,
+    }
+
+
 def sequencer_capacity(sequencer: str | None) -> int:
     normalized = (sequencer or "").casefold().replace(" ", "")
     if "g16" in normalized:
@@ -55,7 +80,7 @@ def calculate_electrophoresis_reagents(
     sample_count: int, config: dict[str, Any], sequencer: str | None
 ) -> dict[str, Any]:
     capacity = sequencer_capacity(sequencer)
-    loaded = int(math.ceil((max(0, sample_count) + 8) / capacity) * capacity)
+    loaded = int(math.ceil(max(0, sample_count) / capacity) * capacity) if sample_count else 0
     reactions = loaded + loaded // 32
     components = []
     labels = {
@@ -110,7 +135,7 @@ def calculate_dilution(
             {
                 "factor": round(factor, 4),
                 "dna_volume": source_dna_volume,
-                "water_volume": round((factor - 1) * source_dna_volume, 2),
+                "water_volume": math.ceil((factor - 1) * source_dna_volume),
             }
         ]
         return result
@@ -119,12 +144,12 @@ def calculate_dilution(
         {
             "factor": round(step_factor, 4),
             "dna_volume": source_dna_volume,
-            "water_volume": round((step_factor - 1) * source_dna_volume, 2),
+            "water_volume": math.ceil((step_factor - 1) * source_dna_volume),
         },
         {
             "factor": round(step_factor, 4),
             "dna_volume": dilution_one_volume,
-            "water_volume": round((step_factor - 1) * dilution_one_volume, 2),
+            "water_volume": math.ceil((step_factor - 1) * dilution_one_volume),
         },
     ]
     return result

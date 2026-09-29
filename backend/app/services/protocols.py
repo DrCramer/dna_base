@@ -20,11 +20,17 @@ from app.models import (
 )
 from app.schemas import ProtocolPreviewRequest
 from app.services.protocol_calculations import (
+    aggregate_pcr_reagents,
     calculate_dilution,
     calculate_electrophoresis_reagents,
     calculate_pcr_reagents,
 )
-from app.services.protocol_plate import build_protocol_layouts, natural_key, plate_capacity
+from app.services.protocol_plate import (
+    build_protocol_layouts,
+    count_active_electrophoresis_wells,
+    natural_key,
+    plate_capacity,
+)
 from app.services.realtime_details import get_latest_realtime_details
 
 
@@ -117,16 +123,17 @@ def build_protocol_dilutions(
     dilution_one_volume: float,
     threshold: float,
 ) -> list[dict[str, Any]]:
-    pcr_wells: dict[int, str] = {}
+    pcr_wells: dict[int, tuple[int, str]] = {}
     for plate in pcr_plates:
         for well in plate["wells"]:
             if well["kind"] == "sample" and well["object_id"] is not None:
-                pcr_wells[well["object_id"]] = f"{plate['plate_index']}:{well['well']}"
+                pcr_wells[well["object_id"]] = (plate["plate_index"], well["well"])
     return [
         {
             "object_id": obj["id"],
             "display_name": obj["rcsme_reg_no"],
-            "well": pcr_wells.get(obj["id"]),
+            "plate_index": pcr_wells.get(obj["id"], (None, None))[0],
+            "well": pcr_wells.get(obj["id"], (None, None))[1],
             **calculate_dilution(
                 obj["rt"]["concentration"] if obj.get("rt") else None,
                 target_concentration=target_concentration,
@@ -233,8 +240,12 @@ async def build_protocol_snapshot(
             }
             for plate in pcr_plates
         ],
+        "pcr_total": aggregate_pcr_reagents(
+            pcr_plates,
+            pcr_profile.reagent_config_json if pcr_profile else {},
+        ),
         "electrophoresis": calculate_electrophoresis_reagents(
-            len(objects),
+            count_active_electrophoresis_wells(pcr_plates),
             electrophoresis_profile.reagent_config_json if electrophoresis_profile else {},
             electrophoresis_stage["sequencer_name"],
         ),

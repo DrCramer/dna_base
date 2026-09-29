@@ -163,7 +163,7 @@ def test_dilutions_use_sample_wells_from_pcr_layout():
         threshold=100,
     )
 
-    assert [item["well"] for item in dilutions] == ["1:B1", "1:C1"]
+    assert [(item["plate_index"], item["well"]) for item in dilutions] == [(1, "B1"), (1, "C1")]
     assert dilutions[0]["total_factor"] == 10
     assert dilutions[0]["steps"] == [{"factor": 10.0, "dna_volume": 3, "water_volume": 27.0}]
     assert dilutions[1]["steps"] == []

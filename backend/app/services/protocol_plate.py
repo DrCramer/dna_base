@@ -7,9 +7,6 @@ ROWS = "ABCDEFGH"
 COLUMNS = range(1, 13)
 WELLS = [f"{row}{column}" for column in COLUMNS for row in ROWS]
 LADDER_WELLS = ["A1", "A3", "A5", "A7", "A9", "A11"]
-PCR_SAMPLE_CAPACITY = 88
-
-
 def natural_key(value: str | None) -> tuple[Any, ...]:
     return tuple(int(part) if part.isdigit() else part.casefold() for part in re.split(r"(\d+)", value or ""))
 
@@ -124,6 +121,23 @@ def build_pcr_plates(objects: Sequence[dict[str, Any]]) -> dict[str, Any]:
     )
 
 
+def count_active_electrophoresis_wells(pcr_plates: Sequence[dict[str, Any]]) -> int:
+    active_count = 0
+    for plate in pcr_plates:
+        sample_wells = [well for well in plate["wells"] if well["kind"] == "sample"]
+        last_sample_column = max(
+            (int(well["well"][1:]) for well in sample_wells),
+            default=0,
+        )
+        active_count += len(sample_wells)
+        active_count += sum(well["kind"] in {"pc", "nc"} for well in plate["wells"])
+        active_count += sum(
+            well["kind"] == "ladder" and int(well["well"][1:]) <= last_sample_column
+            for well in plate["wells"]
+        )
+    return active_count
+
+
 def build_protocol_layouts(
     objects: Sequence[dict[str, Any]], source_rules: dict[str, Any] | None = None
 ) -> dict[str, Any]:
@@ -131,8 +145,4 @@ def build_protocol_layouts(
     source = build_plates(ordered_objects, source_rules, layout_key="source")
     pcr = build_pcr_plates(ordered_objects)
     warnings = [*source["warnings"], *pcr["warnings"]]
-    if len(source["plates"]) > 1:
-        warnings.append(f"Для исходной раскладки создано плашек: {len(source['plates'])}.")
-    if len(pcr["plates"]) > 1:
-        warnings.append(f"Для PCR создано плашек: {len(pcr['plates'])} (по {PCR_SAMPLE_CAPACITY} объектов).")
     return {"source": source, "pcr": pcr, "warnings": warnings}

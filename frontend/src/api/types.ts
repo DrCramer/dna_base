@@ -898,6 +898,7 @@ export interface ProtocolPreview {
   layouts: { source: ProtocolLayout; pcr: ProtocolLayout }
   calculations: {
     pcr: Array<Record<string, unknown>>
+    pcr_total?: Record<string, unknown>
     electrophoresis: Record<string, unknown>
   }
   dilutions: Array<Record<string, unknown>>

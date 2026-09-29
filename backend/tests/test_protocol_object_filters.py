@@ -49,6 +49,25 @@ def test_object_filters_are_combined_with_and():
     assert "<= 1" in sql
 
 
+def test_case_year_filter_is_applied_to_protocol_object_query():
+    conditions = _object_conditions(
+        case_year=2026,
+        party_ids=[],
+        selected_ids=[],
+        q=None,
+        description=None,
+        rcsme_from=None,
+        rcsme_to=None,
+        numbers=["7600-1"],
+        object_type=None,
+        box_no=None,
+        quick=None,
+    )
+    sql = " AND ".join(str(item.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})) for item in conditions)
+    assert "objects.case_year = 2026" in sql
+    assert "7600-1" in sql
+
+
 @pytest.mark.parametrize(
     ("quick", "negated"),
     [("has_rt", False), ("no_rt", True)],

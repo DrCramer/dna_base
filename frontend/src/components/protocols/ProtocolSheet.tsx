@@ -1,6 +1,7 @@
 import { X } from 'lucide-react'
 import type { Employee, ProtocolPlateRules, ProtocolPreview, ProtocolProfile, ProtocolStageSettings, ReferenceItem } from '../../api/types'
 import { ProtocolPlate } from './ProtocolPlate'
+import { ProtocolCalculationTables, ProtocolDilutionsTable, type DilutionSortKey, type DilutionView } from './ProtocolSupplementTables'
 
 const stageLabels: Record<string, string> = { dna_extraction: 'Выделение', realtime: 'Real Time', pcr: 'PCR', electrophoresis: 'Форез' }
 
@@ -19,9 +20,12 @@ interface Props {
   onHeader: (patch: { protocolDate?: string; protocolNo?: number; name?: string }) => void
   onStage: (stageType: ProtocolStageSettings['stage_type'], patch: Partial<ProtocolStageSettings>) => void
   onRules: (patch: Partial<ProtocolPlateRules>) => void
+  dilutionView: DilutionView
+  onDilutionHide: (value: boolean) => void
+  onDilutionSort: (key: Exclude<DilutionSortKey, null>) => void
 }
 
-export function ProtocolSheet({ protocolDate, protocolNo, name, selectedCount, stages, plateRules, preview, profiles, employees, sequencers, readOnly, onHeader, onStage, onRules }: Props) {
+export function ProtocolSheet({ protocolDate, protocolNo, name, selectedCount, stages, plateRules, preview, profiles, employees, sequencers, readOnly, onHeader, onStage, onRules, dilutionView, onDilutionHide, onDilutionSort }: Props) {
   const sourcePlates = preview?.layouts.source.plates || []
   const pcrPlates = preview?.layouts.pcr.plates || []
   return (
@@ -64,25 +68,21 @@ export function ProtocolSheet({ protocolDate, protocolNo, name, selectedCount, s
       {!preview ? <div className="protocol-sheet-empty">Выберите объекты, чтобы построить плашку.</div> : null}
       {sourcePlates.map((plate) => <ProtocolPlate key={`source-${plate.plate_index}`} plate={plate} title={sourcePlates.length > 1 ? `Исходная плашка ${plate.plate_index}` : 'Исходная плашка'} />)}
       {pcrPlates.map((plate) => <ProtocolPlate key={`pcr-${plate.plate_index}`} plate={plate} title={`PCR · плашка ${plate.plate_index}`} />)}
-      {preview ? <ProtocolCalculations preview={preview} /> : null}
+      {preview ? <ProtocolSupplements preview={preview} dilutionView={dilutionView} onDilutionHide={onDilutionHide} onDilutionSort={onDilutionSort} /> : null}
     </article>
   )
 }
 
-function display(value: unknown) {
-  return value === null || value === undefined || value === '' ? '—' : String(value)
-}
-
-function ProtocolCalculations({ preview }: { preview: ProtocolPreview }) {
-  const pcr = preview.calculations.pcr as Array<{ plate_index?: number; components?: Array<{ key: string; label: string; per_reaction: unknown; total: unknown }> }>
-  const forez = preview.calculations.electrophoresis as { components?: Array<{ key: string; label: string; per_reaction: unknown; total: unknown }> }
+function ProtocolSupplements({ preview, dilutionView, onDilutionHide, onDilutionSort }: {
+  preview: ProtocolPreview
+  dilutionView: DilutionView
+  onDilutionHide: (value: boolean) => void
+  onDilutionSort: (key: Exclude<DilutionSortKey, null>) => void
+}) {
   return (
     <div className="protocol-details-blocks">
-      <details><summary>Расчёты</summary><div className="protocol-calculation-columns">
-        <table><thead><tr><th>PCR</th><th>На реакцию</th><th>Всего</th></tr></thead><tbody>{pcr.flatMap((block) => (block.components || []).map((item) => <tr key={`${block.plate_index}-${item.key}`}><td>{pcr.length > 1 ? `${item.label} · ${block.plate_index}` : item.label}</td><td>{display(item.per_reaction)}</td><td>{display(item.total)}</td></tr>))}</tbody></table>
-        <table><thead><tr><th>Форез</th><th>На реакцию</th><th>Всего</th></tr></thead><tbody>{(forez.components || []).map((item) => <tr key={item.key}><td>{item.label}</td><td>{display(item.per_reaction)}</td><td>{display(item.total)}</td></tr>)}</tbody></table>
-      </div></details>
-      {preview.dilutions.length ? <details><summary>Разведения</summary><div className="protocol-dilution-wrap"><table><thead><tr><th>Лунка</th><th>Объект</th><th>Исх. конц.</th><th>Кон. конц.</th><th>Фактор</th><th>I разведение</th><th>II разведение</th></tr></thead><tbody>{preview.dilutions.map((item) => { const steps = (item.steps || []) as Array<Record<string, unknown>>; return <tr key={String(item.object_id)}><td>{display(item.well)}</td><td>{display(item.display_name)}</td><td>{display(item.source_concentration)}</td><td>{display(item.target_concentration)}</td><td>{display(item.total_factor)}</td><td>{steps[0] ? `${display(steps[0].factor)} · ДНК ${display(steps[0].dna_volume)} / вода ${display(steps[0].water_volume)}` : '—'}</td><td>{steps[1] ? `${display(steps[1].factor)} · ДНК ${display(steps[1].dna_volume)} / вода ${display(steps[1].water_volume)}` : '—'}</td></tr> })}</tbody></table></div></details> : null}
+      <details><summary>Расчёты</summary><ProtocolCalculationTables preview={preview} /></details>
+      {preview.dilutions.length ? <details><summary className="protocol-dilution-summary print-hide"><span>Разведения</span><label onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={dilutionView.hideNoDilution} onChange={(event) => onDilutionHide(event.target.checked)} />Скрыть объекты без разведения</label></summary><ProtocolDilutionsTable rows={preview.dilutions} view={dilutionView} onSort={onDilutionSort} /></details> : null}
     </div>
   )
 }

@@ -1,4 +1,4 @@
-from app.services.protocol_plate import build_pcr_plates, build_plates, build_protocol_layouts
+from app.services.protocol_plate import build_pcr_plates, build_plates, build_protocol_layouts, count_active_electrophoresis_wells
 
 
 def objects(count: int) -> list[dict]:
@@ -54,3 +54,13 @@ def test_source_and_pcr_use_same_natural_object_order():
     for key in ("source", "pcr"):
         samples = [item["display_name"] for item in layouts[key]["plates"][0]["wells"] if item["kind"] == "sample"]
         assert samples == ["ии1", "ии2", "ии10"]
+
+
+def test_electrophoresis_counts_only_ladders_through_last_sample_column():
+    plate = build_pcr_plates(objects(1))["plates"][0]
+    assert count_active_electrophoresis_wells([plate]) == 4
+
+
+def test_layout_does_not_add_plate_count_diagnostics_to_warnings():
+    result = build_protocol_layouts(objects(100))
+    assert not any("создано плашек" in warning for warning in result["warnings"])

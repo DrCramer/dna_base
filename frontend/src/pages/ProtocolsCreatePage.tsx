@@ -7,6 +7,8 @@ import type { Protocol, ProtocolPayload, ProtocolPlateRules, ProtocolPreview, Pr
 import { ProtocolObjectSelector } from '../components/protocols/ProtocolObjectSelector'
 import { ProtocolPrintDocument } from '../components/protocols/ProtocolPrintDocument'
 import { ProtocolSheet } from '../components/protocols/ProtocolSheet'
+import { protocolPrintPageCount } from '../components/protocols/ProtocolPrintDocument'
+import type { DilutionSortKey, DilutionView } from '../components/protocols/ProtocolSupplementTables'
 import { ErrorState, LoadingState, PageHeader } from '../components/ui'
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -60,6 +62,7 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
   const [printSelectionOpen, setPrintSelectionOpen] = useState(false)
   const [printIntent, setPrintIntent] = useState<'preview' | 'print'>('preview')
   const [printStageTypes, setPrintStageTypes] = useState<ProtocolStageType[]>(stageTypes)
+  const [dilutionView, setDilutionView] = useState<DilutionView>({ hideNoDilution: false, sortKey: null, directions: { first: 'asc', second: 'asc' } })
   const [autoPrint, setAutoPrint] = useState(false)
   const hydratedId = useRef<number | null>(null)
   const protocol = useQuery({ queryKey: ['protocol', currentId], queryFn: () => api.protocol(currentId as number), enabled: currentId !== null })
@@ -188,13 +191,20 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
     setPrintSelectionOpen(true)
   }
   function confirmPrintSelection() {
-    if (!printStageTypes.length) return
+    if (!preview || !protocolPrintPageCount(preview, printStageTypes, dilutionView)) return
     setPrintSelectionOpen(false)
     setShowPrintPreview(true)
     setAutoPrint(printIntent === 'print')
   }
   function togglePrintStage(stageType: ProtocolStageType) {
     setPrintStageTypes((items) => items.includes(stageType) ? items.filter((item) => item !== stageType) : [...items, stageType])
+  }
+  function sortDilutions(key: Exclude<DilutionSortKey, null>) {
+    setDilutionView((view) => ({
+      ...view,
+      sortKey: key,
+      directions: { ...view.directions, [key]: view.sortKey === key && view.directions[key] === 'asc' ? 'desc' : 'asc' }
+    }))
   }
   if (currentId && protocol.isLoading) return <div className="page"><LoadingState title="Загрузка протокола..." rows={8} /></div>
   if (currentId && protocol.isError) return <div className="page"><ErrorState error={protocol.error} onRetry={() => protocol.refetch()} /></div>
@@ -213,21 +223,20 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
       {save.error || finalize.error || revise.error || previewMutation.error ? <div className="alert danger">{String((save.error || finalize.error || revise.error || previewMutation.error) instanceof Error ? (save.error || finalize.error || revise.error || previewMutation.error)?.message : 'Не удалось выполнить действие')}</div> : null}
       {!readOnly ? <section className={`protocol-selection-panel${selectionOpen ? ' is-open' : ''}`}>
         <button type="button" className="protocol-selection-summary" onClick={() => setSelectionOpen((value) => !value)}><strong>Партии и объекты</strong><span>{partyIds.length} партий · {selectedIds.length} объектов</span><em>{selectionOpen ? 'Свернуть' : 'Изменить'}</em></button>
-        {selectionOpen ? <div className="protocol-selection-body"><label className="protocol-year">Год <select value={year} onChange={(event) => { setYear(Number(event.target.value)); setPartyIds([]); setSelectedIds([]); markDirty() }}>{(years.data?.years || [year]).map((item) => <option key={item}>{item}</option>)}</select></label><ProtocolObjectSelector parties={parties.data?.items || []} partyIds={partyIds} selectedIds={selectedIds} onPartyIds={(ids) => { setPartyIds(ids); markDirty() }} onSelectedIds={(ids) => { setSelectedIds(ids); markDirty() }} /></div> : null}
+        {selectionOpen ? <div className="protocol-selection-body"><label className="protocol-year">Год <select value={year} onChange={(event) => { setYear(Number(event.target.value)); setPartyIds([]); setSelectedIds([]); markDirty() }}>{(years.data?.years || [year]).map((item) => <option key={item}>{item}</option>)}</select></label><ProtocolObjectSelector year={year} parties={parties.data?.items || []} partyIds={partyIds} selectedIds={selectedIds} onPartyIds={(ids) => { setPartyIds(ids); markDirty() }} onSelectedIds={(ids) => { setSelectedIds(ids); markDirty() }} /></div> : null}
       </section> : null}
-      {selectedIds.length > 96 ? <div className="protocol-info-line">Выбрано: {selectedIds.length} объектов. Будет создано несколько плашек.</div> : null}
       {preview?.warnings.map((warning) => <div className="alert warning" key={warning}>{warning}</div>)}
       <div className="protocol-sheet-wrap">
-        <ProtocolSheet protocolDate={protocolDate} protocolNo={protocolNo} name={name} selectedCount={selectedIds.length} stages={stages} plateRules={plateRules} preview={preview} profiles={profiles.data || []} employees={employees.data || []} sequencers={sequencers.data || []} readOnly={readOnly} onHeader={(patch) => { if (patch.protocolDate !== undefined) setProtocolDate(patch.protocolDate); if (patch.protocolNo !== undefined) setProtocolNo(patch.protocolNo); if (patch.name !== undefined) setName(patch.name); markDirty() }} onStage={updateStage} onRules={(patch) => { setPlateRules((rules) => ({ ...rules, ...patch })); markDirty() }} />
+        <ProtocolSheet protocolDate={protocolDate} protocolNo={protocolNo} name={name} selectedCount={selectedIds.length} stages={stages} plateRules={plateRules} preview={preview} profiles={profiles.data || []} employees={employees.data || []} sequencers={sequencers.data || []} readOnly={readOnly} dilutionView={dilutionView} onDilutionHide={(hideNoDilution) => setDilutionView((view) => ({ ...view, hideNoDilution }))} onDilutionSort={sortDilutions} onHeader={(patch) => { if (patch.protocolDate !== undefined) setProtocolDate(patch.protocolDate); if (patch.protocolNo !== undefined) setProtocolNo(patch.protocolNo); if (patch.name !== undefined) setName(patch.name); markDirty() }} onStage={updateStage} onRules={(patch) => { setPlateRules((rules) => ({ ...rules, ...patch })); markDirty() }} />
       </div>
       {printSelectionOpen ? <div className="modal-backdrop" onMouseDown={() => setPrintSelectionOpen(false)}><div className="modal protocol-print-selection" role="dialog" aria-modal="true" aria-label="Что печатать" onMouseDown={(event) => event.stopPropagation()}>
         <h2>Что печатать</h2>
         <div className="protocol-print-stage-options">{([
           ['dna_extraction', 'Выделение'], ['realtime', 'RT'], ['pcr', 'PCR'], ['electrophoresis', 'Форез']
         ] as Array<[ProtocolStageType, string]>).map(([stageType, label]) => <label key={stageType}><input type="checkbox" checked={printStageTypes.includes(stageType)} onChange={() => togglePrintStage(stageType)} />{label}</label>)}</div>
-        <div className="modal-actions"><button type="button" className="icon-button" onClick={() => setPrintSelectionOpen(false)}>Отмена</button><button type="button" className="primary compact" disabled={!printStageTypes.length} onClick={confirmPrintSelection}>{printIntent === 'print' ? <Printer size={17} /> : <Eye size={17} />}{printIntent === 'print' ? 'Печать' : 'Предпросмотр'}</button></div>
+        <div className="modal-actions"><button type="button" className="icon-button" onClick={() => setPrintSelectionOpen(false)}>Отмена</button><button type="button" className="primary compact" disabled={!preview || !protocolPrintPageCount(preview, printStageTypes, dilutionView)} onClick={confirmPrintSelection}>{printIntent === 'print' ? <Printer size={17} /> : <Eye size={17} />}{printIntent === 'print' ? 'Печать' : 'Предпросмотр'}</button></div>
       </div></div> : null}
-      {showPrintPreview && preview ? createPortal(<div className="modal-backdrop protocol-preview-backdrop" onMouseDown={() => setShowPrintPreview(false)}><div className="protocol-preview-modal" role="dialog" aria-modal="true" aria-label="Предпросмотр печати" onMouseDown={(event) => event.stopPropagation()}><div className="protocol-preview-toolbar"><strong>Предпросмотр A4 landscape · страниц: {printStageTypes.reduce((total, stageType) => total + (stageType === 'pcr' ? preview.layouts.pcr.plates.length : preview.layouts.source.plates.length), 0)}</strong><button type="button" className="primary compact" onClick={printProtocol}><Printer size={17} />Печать</button><button type="button" className="icon-button" onClick={() => setShowPrintPreview(false)}>Закрыть</button></div><div className="protocol-print-root"><ProtocolPrintDocument protocolDate={protocolDate} protocolNo={protocolNo} name={name} stages={stages} selectedStageTypes={printStageTypes} plateRules={plateRules} preview={preview} employees={employees.data || []} /></div></div></div>, document.body) : null}
+      {showPrintPreview && preview ? createPortal(<div className="modal-backdrop protocol-preview-backdrop" onMouseDown={() => setShowPrintPreview(false)}><div className="protocol-preview-modal" role="dialog" aria-modal="true" aria-label="Предпросмотр печати" onMouseDown={(event) => event.stopPropagation()}><div className="protocol-preview-toolbar"><strong>Предпросмотр A4 landscape · страниц: {protocolPrintPageCount(preview, printStageTypes, dilutionView)}</strong><button type="button" className="primary compact" onClick={printProtocol}><Printer size={17} />Печать</button><button type="button" className="icon-button" onClick={() => setShowPrintPreview(false)}>Закрыть</button></div><div className="protocol-print-root"><ProtocolPrintDocument protocolDate={protocolDate} protocolNo={protocolNo} name={name} stages={stages} selectedStageTypes={printStageTypes} plateRules={plateRules} preview={preview} employees={employees.data || []} dilutionView={dilutionView} onDilutionSort={sortDilutions} /></div></div></div>, document.body) : null}
     </div>
   )
 }
