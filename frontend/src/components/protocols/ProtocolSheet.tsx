@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { ChevronRight, X } from 'lucide-react'
 import type { Employee, ProtocolPlateRules, ProtocolPreview, ProtocolProfile, ProtocolStageSettings, ReferenceItem } from '../../api/types'
 import { ProtocolPlate } from './ProtocolPlate'
 import { ProtocolCalculationTables, ProtocolDilutionsTable, type DilutionSortKey, type DilutionView } from './ProtocolSupplementTables'
@@ -82,7 +82,7 @@ function ProtocolSupplements({ preview, dilutionView, onDilutionHide, onDilution
   return (
     <div className="protocol-details-blocks">
       <details><summary>Расчёты</summary><ProtocolCalculationTables preview={preview} /></details>
-      {preview.dilutions.length ? <details><summary className="protocol-dilution-summary print-hide"><span>Разведения</span><label onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={dilutionView.hideNoDilution} onChange={(event) => onDilutionHide(event.target.checked)} />Скрыть объекты без разведения</label></summary><ProtocolDilutionsTable rows={preview.dilutions} view={dilutionView} onSort={onDilutionSort} /></details> : null}
+      {preview.dilutions.length ? <details><summary className="protocol-dilution-summary print-hide"><span className="protocol-details-title"><ChevronRight className="protocol-details-chevron" size={16} />Разведения</span><label onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}><input type="checkbox" checked={dilutionView.hideNoDilution} onClick={(event) => event.stopPropagation()} onChange={(event) => onDilutionHide(event.target.checked)} />Скрыть объекты без разведения</label></summary><ProtocolDilutionsTable rows={preview.dilutions} view={dilutionView} onSort={onDilutionSort} /></details> : null}
     </div>
   )
 }

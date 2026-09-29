@@ -114,10 +114,19 @@
 .protocol-details-blocks { border-top: 1px solid var(--border-strong); }
 .protocol-details-blocks details { border-bottom: 1px solid var(--border); }
 .protocol-details-blocks summary { padding: 9px 14px; cursor: pointer; font-weight: 750; }
+.protocol-dilution-summary { list-style: none; }
+.protocol-dilution-summary::-webkit-details-marker { display: none; }
+.protocol-details-title { display: inline-flex; align-items: center; gap: 5px; }
+.protocol-details-chevron { flex: none; transition: transform .15s ease; }
+.protocol-details-blocks details[open] > .protocol-dilution-summary .protocol-details-chevron { transform: rotate(90deg); }
 .protocol-calculation-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 0 14px 14px; }
 .protocol-calculation-columns table, .protocol-dilution-wrap table { width: 100%; border-collapse: collapse; font-size: 11px; }
 .protocol-calculation-columns th, .protocol-calculation-columns td, .protocol-dilution-wrap th, .protocol-dilution-wrap td { padding: 5px 6px; border: 1px solid var(--border); text-align: left; }
 .protocol-dilution-wrap { overflow: auto; padding: 0 14px 14px; }
+.protocol-dilution-wrap .protocol-dilution-col-plate,
+.protocol-dilution-wrap .protocol-dilution-col-well { width: 1%; white-space: nowrap; }
+.protocol-dilution-wrap tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--table) 60%, var(--panel)); }
+.protocol-dilution-wrap tbody tr:hover td { background: color-mix(in srgb, var(--accent) 9%, var(--panel)); }
 .protocol-dilution-section h2 { margin: 0 0 8px; font-size: 16px; }
 .protocol-dilution-heading { display: flex; align-items: center; justify-content: flex-end; min-height: 32px; padding: 0 14px 8px; }
 .protocol-dilution-heading label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
@@ -159,9 +168,13 @@
 .protocol-print-data-page .protocol-print-meta { margin-bottom: 8px; }
 .protocol-print-data-page .protocol-dilution-heading { display: none; }
 .protocol-print-data-page .protocol-dilution-wrap { overflow: visible; padding: 0; }
-.protocol-print-data-page .protocol-dilution-wrap table { font-size: 9px; table-layout: fixed; }
+.protocol-print-data-page .protocol-dilution-wrap table { width: 100%; font-size: 9px; table-layout: auto; }
 .protocol-print-data-page .protocol-dilution-wrap th,
 .protocol-print-data-page .protocol-dilution-wrap td { padding: 2px 3px; text-align: center; overflow-wrap: anywhere; }
+.protocol-print-data-page .protocol-dilution-wrap .protocol-dilution-col-plate,
+.protocol-print-data-page .protocol-dilution-wrap .protocol-dilution-col-well { width: 1%; white-space: nowrap; }
+.protocol-print-data-page .protocol-dilution-wrap tbody tr:nth-child(even) td { background: #f7f7f7; }
+.protocol-print-data-page .protocol-dilution-wrap tbody tr:hover td { background: transparent; }
 .protocol-print-data-page .protocol-calculation-columns { gap: 9px; padding: 0; }
 .protocol-print-data-page .protocol-calculation-columns table { font-size: 10px; }
 .protocol-print-data-page .protocol-calculation-columns th,

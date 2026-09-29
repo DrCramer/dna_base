@@ -36,7 +36,7 @@ export function visibleDilutions(rows: Array<Record<string, unknown> | DilutionR
     } as DilutionRow
   })
   const filtered = view.hideNoDilution
-    ? normalized.filter((row) => row.available === false || (row.steps?.length || 0) > 0)
+    ? normalized.filter((row) => (row.steps?.length || 0) > 0)
     : normalized
   if (!view.sortKey) return filtered
   const stepIndex = view.sortKey === 'first' ? 0 : 1
@@ -109,14 +109,14 @@ export function ProtocolDilutionsTable({ rows, view, onHideNoDilution, onSort, p
       {shown.length ? <div className="protocol-dilution-wrap"><table>
         <thead>
           <tr>
-            <th rowSpan={2}>Плашка</th><th rowSpan={2}>Лунка</th><th rowSpan={2}>Объект</th><th rowSpan={2}>Исх. конц.</th><th rowSpan={2}>Кон. конц.</th><th rowSpan={2}>Фактор</th>
+            <th className="protocol-dilution-col-plate" rowSpan={2}>Плашка</th><th className="protocol-dilution-col-well" rowSpan={2}>Лунка</th><th rowSpan={2}>Объект</th><th rowSpan={2}>Исх. конц.</th><th rowSpan={2}>Кон. конц.</th><th rowSpan={2}>Фактор</th>
             <th colSpan={2}>I разведение <SortButton active={view.sortKey === 'first'} direction={view.directions.first} onClick={() => onSort?.('first')} /></th>
             <th colSpan={2}>II разведение <SortButton active={view.sortKey === 'second'} direction={view.directions.second} onClick={() => onSort?.('second')} /></th>
           </tr>
           <tr><th>ДНК</th><th>H₂O</th><th>ДНК</th><th>H₂O</th></tr>
         </thead>
         <tbody>{shown.map((item) => <tr key={item.object_id}>
-          <td>{formatProtocolValue(item.plate_index)}</td><td>{formatProtocolValue(item.well)}</td><td>{formatProtocolValue(item.display_name)}</td>
+          <td className="protocol-dilution-col-plate">{formatProtocolValue(item.plate_index)}</td><td className="protocol-dilution-col-well">{formatProtocolValue(item.well)}</td><td>{formatProtocolValue(item.display_name)}</td>
           <td>{formatProtocolValue(item.source_concentration)}</td><td>{formatProtocolValue(item.target_concentration)}</td><td>{formatProtocolValue(item.total_factor)}</td>
           <td>{formatProtocolValue(item.steps?.[0]?.dna_volume)}</td><td>{formatProtocolValue(item.steps?.[0]?.water_volume)}</td>
           <td>{formatProtocolValue(item.steps?.[1]?.dna_volume)}</td><td>{formatProtocolValue(item.steps?.[1]?.water_volume)}</td>
