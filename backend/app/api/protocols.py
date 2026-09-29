@@ -15,7 +15,6 @@ from app.models import (
     LabProtocolStagePerformer,
     ProtocolStageProfile,
     RegistryObject,
-    RtResult,
     StageEvent,
     User,
 )
@@ -47,6 +46,10 @@ from app.services.protocols import (
     build_protocol_snapshot,
     replace_protocol_relations,
     suggested_protocol_meta,
+)
+from app.services.realtime_details import (
+    get_latest_realtime_details,
+    latest_realtime_has_small_quantity,
 )
 
 
@@ -150,9 +153,9 @@ def _object_conditions(
     if box_no:
         conditions.append(RegistryObject.box_no == box_no)
     if quick == "has_rt":
-        conditions.append(exists(select(RtResult.id).where(RtResult.object_id == RegistryObject.id)))
+        conditions.append(latest_realtime_has_small_quantity(RegistryObject.id))
     elif quick == "no_rt":
-        conditions.append(~exists(select(RtResult.id).where(RtResult.object_id == RegistryObject.id)))
+        conditions.append(~latest_realtime_has_small_quantity(RegistryObject.id))
     elif quick in {"dna_extraction", "realtime", "pcr", "electrophoresis"}:
         conditions.append(
             exists(
@@ -213,9 +216,12 @@ async def _object_rows(
         )
     ).scalars().all()
     ids = [item.id for item in rows]
-    rt_ids = set(
-        (await session.execute(select(RtResult.object_id).where(RtResult.object_id.in_(ids)).distinct())).scalars()
-    ) if ids else set()
+    latest_rt = await get_latest_realtime_details(session, ids)
+    rt_ids = {
+        object_id
+        for object_id, item in latest_rt.items()
+        if item.detail is not None and item.detail.small_quantity is not None
+    }
     stage_rows = (
         await session.execute(
             select(StageEvent.object_id, StageEvent.stage_type)

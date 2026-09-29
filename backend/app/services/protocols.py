@@ -16,7 +16,6 @@ from app.models import (
     Party,
     ProtocolStageProfile,
     RegistryObject,
-    RtResult,
     StageEvent,
 )
 from app.schemas import ProtocolPreviewRequest
@@ -26,6 +25,7 @@ from app.services.protocol_calculations import (
     calculate_pcr_reagents,
 )
 from app.services.protocol_plate import build_protocol_layouts, natural_key, plate_capacity
+from app.services.realtime_details import get_latest_realtime_details
 
 
 STAGE_ORDER = ("dna_extraction", "realtime", "pcr", "electrophoresis")
@@ -60,18 +60,7 @@ async def protocol_object_snapshots(
     if len(rows) != len(set(object_ids)):
         raise HTTPException(status_code=400, detail="Часть выбранных объектов не найдена или находится в архиве")
     object_id_set = {obj.id for obj, _party_no in rows}
-    latest_rt_ids = (
-        select(RtResult.object_id, func.max(RtResult.id).label("max_id"))
-        .where(RtResult.object_id.in_(object_id_set))
-        .group_by(RtResult.object_id)
-        .subquery()
-    )
-    rt_rows = (
-        await session.execute(
-            select(RtResult).join(latest_rt_ids, RtResult.id == latest_rt_ids.c.max_id)
-        )
-    ).scalars()
-    rt_by_object = {row.object_id: row for row in rt_rows}
+    rt_by_object = await get_latest_realtime_details(session, object_id_set)
     stage_rows = (
         await session.execute(
             select(StageEvent.object_id, StageEvent.stage_type)
@@ -85,7 +74,8 @@ async def protocol_object_snapshots(
 
     snapshots = []
     for obj, joined_party_no in rows:
-        rt = rt_by_object.get(obj.id)
+        latest_rt = rt_by_object.get(obj.id)
+        rt = latest_rt.detail if latest_rt else None
         snapshots.append(
             {
                 "id": obj.id,
@@ -100,12 +90,14 @@ async def protocol_object_snapshots(
                 "box_no": obj.box_no,
                 "rt": (
                     {
-                        "result_id": rt.id,
-                        "concentration": rt.mean_quantity_ng_ul
-                        if rt.mean_quantity_ng_ul is not None
-                        else rt.quantity_ng_ul,
-                        "ct_cq": rt.cq if rt.cq is not None else rt.ct,
-                        "di": rt.degradation_index,
+                        "event_id": latest_rt.event_id,
+                        "small_quantity": rt.small_quantity,
+                        "long_quantity": rt.long_quantity,
+                        "y_quantity": rt.y_quantity,
+                        "concentration": rt.small_quantity,
+                        "ct_cq": rt.ct_cq,
+                        "di": rt.di,
+                        "ipc": rt.ipc,
                     }
                     if rt
                     else None
@@ -114,6 +106,37 @@ async def protocol_object_snapshots(
             }
         )
     return sorted(snapshots, key=lambda item: (natural_key(item["rcsme_reg_no"]), item["id"]))
+
+
+def build_protocol_dilutions(
+    objects: list[dict[str, Any]],
+    pcr_plates: list[dict[str, Any]],
+    *,
+    target_concentration: float,
+    source_dna_volume: float,
+    dilution_one_volume: float,
+    threshold: float,
+) -> list[dict[str, Any]]:
+    pcr_wells: dict[int, str] = {}
+    for plate in pcr_plates:
+        for well in plate["wells"]:
+            if well["kind"] == "sample" and well["object_id"] is not None:
+                pcr_wells[well["object_id"]] = f"{plate['plate_index']}:{well['well']}"
+    return [
+        {
+            "object_id": obj["id"],
+            "display_name": obj["rcsme_reg_no"],
+            "well": pcr_wells.get(obj["id"]),
+            **calculate_dilution(
+                obj["rt"]["concentration"] if obj.get("rt") else None,
+                target_concentration=target_concentration,
+                source_dna_volume=source_dna_volume,
+                dilution_one_volume=dilution_one_volume,
+                threshold=threshold,
+            ),
+        }
+        for obj in objects
+    ]
 
 
 async def _stage_snapshots(
@@ -219,27 +242,14 @@ async def build_protocol_snapshot(
     dilution_settings = payload.dilution.model_dump()
     dilutions = []
     if payload.dilution.enabled:
-        source_wells: dict[int, str] = {}
-        for plate in layouts["source"]["plates"]:
-            for well in plate["wells"]:
-                if well["kind"] == "sample" and well["object_id"] is not None:
-                    source_wells[well["object_id"]] = f"{plate['plate_index']}:{well['well']}"
-        for obj in objects:
-            concentration = obj["rt"]["concentration"] if obj.get("rt") else None
-            dilutions.append(
-                {
-                    "object_id": obj["id"],
-                    "display_name": obj["rcsme_reg_no"],
-                    "well": source_wells.get(obj["id"]),
-                    **calculate_dilution(
-                        concentration,
-                        target_concentration=payload.dilution.target_concentration,
-                        source_dna_volume=payload.dilution.source_dna_volume,
-                        dilution_one_volume=payload.dilution.dilution_one_volume,
-                        threshold=payload.dilution.threshold,
-                    ),
-                }
-            )
+        dilutions = build_protocol_dilutions(
+            objects,
+            layouts["pcr"]["plates"],
+            target_concentration=payload.dilution.target_concentration,
+            source_dna_volume=payload.dilution.source_dna_volume,
+            dilution_one_volume=payload.dilution.dilution_one_volume,
+            threshold=payload.dilution.threshold,
+        )
     missing_concentration = sum(1 for item in dilutions if not item["available"])
     warnings = list(layouts["warnings"])
     if missing_concentration:

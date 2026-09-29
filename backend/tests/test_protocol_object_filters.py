@@ -47,3 +47,35 @@ def test_object_filters_are_combined_with_and():
     assert "lower(trim(objects.object_description)) = 'кость'" in sql
     assert ">= 1" in sql
     assert "<= 1" in sql
+
+
+@pytest.mark.parametrize(
+    ("quick", "negated"),
+    [("has_rt", False), ("no_rt", True)],
+)
+def test_rt_quick_filter_uses_small_quantity_from_latest_active_event(quick, negated):
+    conditions = _object_conditions(
+        party_ids=[],
+        selected_ids=[],
+        q=None,
+        description=None,
+        rcsme_from=None,
+        rcsme_to=None,
+        numbers=[],
+        object_type=None,
+        box_no=None,
+        quick=quick,
+    )
+    sql = str(
+        conditions[-1].compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+
+    assert ("NOT (EXISTS" in sql) is negated
+    assert "realtime_details.small_quantity IS NOT NULL" in sql
+    assert "stage_events.stage_type = 'realtime'" in sql
+    assert "stage_events.is_cancelled IS false" in sql
+    assert "ORDER BY stage_events.attempt_no DESC" in sql
+    assert "rt_results" not in sql
