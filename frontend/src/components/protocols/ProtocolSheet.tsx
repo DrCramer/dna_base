@@ -21,11 +21,13 @@ interface Props {
   onStage: (stageType: ProtocolStageSettings['stage_type'], patch: Partial<ProtocolStageSettings>) => void
   onRules: (patch: Partial<ProtocolPlateRules>) => void
   dilutionView: DilutionView
+  minimumFinalVolumeEnabled: boolean
+  onMinimumFinalVolumeEnabled: (enabled: boolean) => void
   onDilutionHide: (value: boolean) => void
   onDilutionSort: (key: Exclude<DilutionSortKey, null>) => void
 }
 
-export function ProtocolSheet({ protocolDate, protocolNo, name, selectedCount, stages, plateRules, preview, profiles, employees, sequencers, readOnly, onHeader, onStage, onRules, dilutionView, onDilutionHide, onDilutionSort }: Props) {
+export function ProtocolSheet({ protocolDate, protocolNo, name, selectedCount, stages, plateRules, preview, profiles, employees, sequencers, readOnly, onHeader, onStage, onRules, dilutionView, minimumFinalVolumeEnabled, onMinimumFinalVolumeEnabled, onDilutionHide, onDilutionSort }: Props) {
   const sourcePlates = preview?.layouts.source.plates || []
   const pcrPlates = preview?.layouts.pcr.plates || []
   return (
@@ -68,21 +70,24 @@ export function ProtocolSheet({ protocolDate, protocolNo, name, selectedCount, s
       {!preview ? <div className="protocol-sheet-empty">Выберите объекты, чтобы построить плашку.</div> : null}
       {sourcePlates.map((plate) => <ProtocolPlate key={`source-${plate.plate_index}`} plate={plate} title={sourcePlates.length > 1 ? `Исходная плашка ${plate.plate_index}` : 'Исходная плашка'} />)}
       {pcrPlates.map((plate) => <ProtocolPlate key={`pcr-${plate.plate_index}`} plate={plate} title={`PCR · плашка ${plate.plate_index}`} />)}
-      {preview ? <ProtocolSupplements preview={preview} dilutionView={dilutionView} onDilutionHide={onDilutionHide} onDilutionSort={onDilutionSort} /> : null}
+      {preview ? <ProtocolSupplements preview={preview} dilutionView={dilutionView} minimumFinalVolumeEnabled={minimumFinalVolumeEnabled} readOnly={readOnly} onMinimumFinalVolumeEnabled={onMinimumFinalVolumeEnabled} onDilutionHide={onDilutionHide} onDilutionSort={onDilutionSort} /> : null}
     </article>
   )
 }
 
-function ProtocolSupplements({ preview, dilutionView, onDilutionHide, onDilutionSort }: {
+function ProtocolSupplements({ preview, dilutionView, minimumFinalVolumeEnabled, readOnly, onMinimumFinalVolumeEnabled, onDilutionHide, onDilutionSort }: {
   preview: ProtocolPreview
   dilutionView: DilutionView
+  minimumFinalVolumeEnabled: boolean
+  readOnly?: boolean
+  onMinimumFinalVolumeEnabled: (enabled: boolean) => void
   onDilutionHide: (value: boolean) => void
   onDilutionSort: (key: Exclude<DilutionSortKey, null>) => void
 }) {
   return (
     <div className="protocol-details-blocks">
       <details><summary>Расчёты</summary><ProtocolCalculationTables preview={preview} /></details>
-      {preview.dilutions.length ? <details><summary className="protocol-dilution-summary print-hide"><span className="protocol-details-title"><ChevronRight className="protocol-details-chevron" size={16} />Разведения</span><label onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}><input type="checkbox" checked={dilutionView.hideNoDilution} onClick={(event) => event.stopPropagation()} onChange={(event) => onDilutionHide(event.target.checked)} />Скрыть объекты без разведения</label></summary><ProtocolDilutionsTable rows={preview.dilutions} view={dilutionView} onSort={onDilutionSort} /></details> : null}
+      {preview.dilutions.length ? <details><summary className="protocol-dilution-summary print-hide"><span className="protocol-details-title"><ChevronRight className="protocol-details-chevron" size={16} />Разведения</span><div className="protocol-dilution-options"><label onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}><input type="checkbox" checked={dilutionView.hideNoDilution} onClick={(event) => event.stopPropagation()} onChange={(event) => onDilutionHide(event.target.checked)} />Скрыть объекты без разведения</label><label onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}><input type="checkbox" checked={minimumFinalVolumeEnabled} disabled={readOnly} onClick={(event) => event.stopPropagation()} onChange={(event) => onMinimumFinalVolumeEnabled(event.target.checked)} />Минимальный объём 15 мкл</label></div></summary><ProtocolDilutionsTable rows={preview.dilutions} view={dilutionView} onSort={onDilutionSort} /></details> : null}
     </div>
   )
 }

@@ -131,7 +131,9 @@
 .protocol-dilution-heading { display: flex; align-items: center; justify-content: flex-end; min-height: 32px; padding: 0 14px 8px; }
 .protocol-dilution-heading label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
 .protocol-dilution-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.protocol-dilution-summary label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.protocol-dilution-options { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px 18px; }
+.protocol-dilution-summary label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.protocol-dilution-warning { display: inline-block; margin-left: 5px; color: var(--warning); vertical-align: -2px; }
 .protocol-dilution-section thead th { text-align: center; vertical-align: middle; white-space: nowrap; }
 .protocol-dilution-sort { display: inline-grid; place-items: center; width: 20px; height: 20px; margin-left: 3px; padding: 0; border: 0; background: transparent; color: inherit; vertical-align: middle; cursor: pointer; }
 .protocol-supplement-empty { padding: 10px 14px; color: var(--muted); font-size: 12px; }

@@ -28,6 +28,7 @@ function snapshotPreview(protocol: Protocol): ProtocolPreview | null {
     dilutions?: Array<Record<string, unknown>>
     warnings?: string[]
     plate_rules?: ProtocolPlateRules
+    dilution_settings?: ProtocolPayload['dilution']
   }
   if (!snapshot.layouts?.source || !snapshot.layouts?.pcr) return null
   return {
@@ -55,6 +56,7 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [stages, setStages] = useState<ProtocolStageSettings[]>(() => initialStages(today()))
   const [plateRules, setPlateRules] = useState<ProtocolPlateRules>(defaultRules)
+  const [minimumFinalVolumeEnabled, setMinimumFinalVolumeEnabled] = useState(false)
   const [selectionOpen, setSelectionOpen] = useState(true)
   const [preview, setPreview] = useState<ProtocolPreview | null>(null)
   const [dirty, setDirty] = useState(false)
@@ -90,6 +92,7 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
       objects?: Array<{ id?: number; party_id?: number | null }>
       stages?: Array<Record<string, unknown>>
       plate_rules?: ProtocolPlateRules
+      dilution_settings?: ProtocolPayload['dilution']
     }
     setProtocolDate(data.protocol_date)
     setProtocolNo(data.protocol_no)
@@ -113,6 +116,7 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
       }
     }))
     setPlateRules(snapshot.plate_rules || defaultRules)
+    setMinimumFinalVolumeEnabled(snapshot.dilution_settings?.minimum_final_volume_enabled ?? false)
     setPreview(snapshotPreview(data))
     setSelectionOpen(!(snapshot.objects?.length))
     setDirty(false)
@@ -149,8 +153,8 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
     object_ids: selectedIds,
     stages,
     plate_rules: plateRules,
-    dilution: { enabled: true, target_concentration: 0.1, source_dna_volume: 3, dilution_one_volume: 10, threshold: 100 }
-  }), [comment, name, plateRules, protocolDate, protocolNo, selectedIds, stages])
+    dilution: { enabled: true, target_concentration: 0.1, source_dna_volume: 3, dilution_one_volume: 10, threshold: 100, minimum_final_volume_enabled: minimumFinalVolumeEnabled }
+  }), [comment, minimumFinalVolumeEnabled, name, plateRules, protocolDate, protocolNo, selectedIds, stages])
   const previewMutation = useMutation({ mutationFn: api.previewProtocol, onSuccess: setPreview })
   useEffect(() => {
     if (readOnly || !selectedIds.length || !name.trim()) return
@@ -227,7 +231,7 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
       </section> : null}
       {preview?.warnings.map((warning) => <div className="alert warning" key={warning}>{warning}</div>)}
       <div className="protocol-sheet-wrap">
-        <ProtocolSheet protocolDate={protocolDate} protocolNo={protocolNo} name={name} selectedCount={selectedIds.length} stages={stages} plateRules={plateRules} preview={preview} profiles={profiles.data || []} employees={employees.data || []} sequencers={sequencers.data || []} readOnly={readOnly} dilutionView={dilutionView} onDilutionHide={(hideNoDilution) => setDilutionView((view) => ({ ...view, hideNoDilution }))} onDilutionSort={sortDilutions} onHeader={(patch) => { if (patch.protocolDate !== undefined) setProtocolDate(patch.protocolDate); if (patch.protocolNo !== undefined) setProtocolNo(patch.protocolNo); if (patch.name !== undefined) setName(patch.name); markDirty() }} onStage={updateStage} onRules={(patch) => { setPlateRules((rules) => ({ ...rules, ...patch })); markDirty() }} />
+        <ProtocolSheet protocolDate={protocolDate} protocolNo={protocolNo} name={name} selectedCount={selectedIds.length} stages={stages} plateRules={plateRules} preview={preview} profiles={profiles.data || []} employees={employees.data || []} sequencers={sequencers.data || []} readOnly={readOnly} dilutionView={dilutionView} minimumFinalVolumeEnabled={minimumFinalVolumeEnabled} onMinimumFinalVolumeEnabled={(enabled) => { setMinimumFinalVolumeEnabled(enabled); markDirty() }} onDilutionHide={(hideNoDilution) => setDilutionView((view) => ({ ...view, hideNoDilution }))} onDilutionSort={sortDilutions} onHeader={(patch) => { if (patch.protocolDate !== undefined) setProtocolDate(patch.protocolDate); if (patch.protocolNo !== undefined) setProtocolNo(patch.protocolNo); if (patch.name !== undefined) setName(patch.name); markDirty() }} onStage={updateStage} onRules={(patch) => { setPlateRules((rules) => ({ ...rules, ...patch })); markDirty() }} />
       </div>
       {printSelectionOpen ? <div className="modal-backdrop" onMouseDown={() => setPrintSelectionOpen(false)}><div className="modal protocol-print-selection" role="dialog" aria-modal="true" aria-label="Что печатать" onMouseDown={(event) => event.stopPropagation()}>
         <h2>Что печатать</h2>

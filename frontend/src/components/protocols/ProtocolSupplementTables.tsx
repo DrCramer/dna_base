@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react'
 import type { ProtocolPreview } from '../../api/types'
 
 export type DilutionSortKey = 'first' | 'second' | null
@@ -19,6 +19,8 @@ export interface DilutionRow {
   target_concentration?: number | null
   total_factor?: number | null
   available?: boolean
+  minimum_volume_available?: boolean
+  minimum_volume_warning?: string | null
   steps?: Array<{ dna_volume?: number | null; water_volume?: number | null }>
 }
 
@@ -61,6 +63,12 @@ export function dilutionSupplementPageCount(rows: Array<Record<string, unknown> 
 
 export function formatProtocolValue(value: unknown) {
   return value === null || value === undefined || value === '' ? '—' : String(value)
+}
+
+function formatDilutionVolume(value: unknown) {
+  return typeof value === 'number'
+    ? new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 }).format(value)
+    : formatProtocolValue(value)
 }
 
 type Reagent = { key: string; label: string; per_reaction: unknown; total: unknown }
@@ -116,10 +124,10 @@ export function ProtocolDilutionsTable({ rows, view, onHideNoDilution, onSort, p
           <tr><th>ДНК</th><th>H₂O</th><th>ДНК</th><th>H₂O</th></tr>
         </thead>
         <tbody>{shown.map((item) => <tr key={item.object_id}>
-          <td className="protocol-dilution-col-plate">{formatProtocolValue(item.plate_index)}</td><td className="protocol-dilution-col-well">{formatProtocolValue(item.well)}</td><td>{formatProtocolValue(item.display_name)}</td>
+          <td className="protocol-dilution-col-plate">{formatProtocolValue(item.plate_index)}</td><td className="protocol-dilution-col-well">{formatProtocolValue(item.well)}</td><td>{formatProtocolValue(item.display_name)}{item.minimum_volume_available === false && item.minimum_volume_warning ? <span className="protocol-dilution-warning" role="img" aria-label={item.minimum_volume_warning} title={item.minimum_volume_warning}><AlertTriangle size={14} aria-hidden="true" /></span> : null}</td>
           <td>{formatProtocolValue(item.source_concentration)}</td><td>{formatProtocolValue(item.target_concentration)}</td><td>{formatProtocolValue(item.total_factor)}</td>
-          <td>{formatProtocolValue(item.steps?.[0]?.dna_volume)}</td><td>{formatProtocolValue(item.steps?.[0]?.water_volume)}</td>
-          <td>{formatProtocolValue(item.steps?.[1]?.dna_volume)}</td><td>{formatProtocolValue(item.steps?.[1]?.water_volume)}</td>
+          <td>{formatDilutionVolume(item.steps?.[0]?.dna_volume)}</td><td>{formatProtocolValue(item.steps?.[0]?.water_volume)}</td>
+          <td>{formatDilutionVolume(item.steps?.[1]?.dna_volume)}</td><td>{formatProtocolValue(item.steps?.[1]?.water_volume)}</td>
         </tr>)}</tbody>
       </table></div> : <div className="protocol-supplement-empty">Нет строк для отображения.</div>}
     </section>

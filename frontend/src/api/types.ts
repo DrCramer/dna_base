@@ -861,6 +861,9 @@ export interface ProtocolPayload {
     source_dna_volume: number
     dilution_one_volume: number
     threshold: number
+    minimum_final_volume_enabled: boolean
+    minimum_final_volume?: number
+    source_available_volume?: number
   }
 }
 

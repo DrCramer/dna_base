@@ -122,6 +122,9 @@ def build_protocol_dilutions(
     source_dna_volume: float,
     dilution_one_volume: float,
     threshold: float,
+    minimum_final_volume_enabled: bool = False,
+    minimum_final_volume: float = 15,
+    source_available_volume: float = 50,
 ) -> list[dict[str, Any]]:
     pcr_wells: dict[int, tuple[int, str]] = {}
     for plate in pcr_plates:
@@ -140,6 +143,9 @@ def build_protocol_dilutions(
                 source_dna_volume=source_dna_volume,
                 dilution_one_volume=dilution_one_volume,
                 threshold=threshold,
+                minimum_final_volume_enabled=minimum_final_volume_enabled,
+                minimum_final_volume=minimum_final_volume,
+                source_available_volume=source_available_volume,
             ),
         }
         for obj in objects
@@ -260,6 +266,9 @@ async def build_protocol_snapshot(
             source_dna_volume=payload.dilution.source_dna_volume,
             dilution_one_volume=payload.dilution.dilution_one_volume,
             threshold=payload.dilution.threshold,
+            minimum_final_volume_enabled=payload.dilution.minimum_final_volume_enabled,
+            minimum_final_volume=payload.dilution.minimum_final_volume,
+            source_available_volume=payload.dilution.source_available_volume,
         )
     missing_concentration = sum(1 for item in dilutions if not item["available"])
     warnings = list(layouts["warnings"])

@@ -43,6 +43,9 @@ class ProtocolDilutionSettings(BaseModel):
     source_dna_volume: float = Field(default=3, gt=0)
     dilution_one_volume: float = Field(default=10, gt=0)
     threshold: float = Field(default=100, gt=1)
+    minimum_final_volume_enabled: bool = False
+    minimum_final_volume: float = Field(default=15, gt=0)
+    source_available_volume: float = Field(default=50, gt=0)
 
 
 class ProtocolPreviewRequest(BaseModel):

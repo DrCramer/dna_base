@@ -116,6 +116,9 @@ def calculate_dilution(
     source_dna_volume: float = 3,
     dilution_one_volume: float = 10,
     threshold: float = 100,
+    minimum_final_volume_enabled: bool = False,
+    minimum_final_volume: float = 15,
+    source_available_volume: float = 50,
 ) -> dict[str, Any]:
     result = {
         "source_concentration": source_concentration,
@@ -123,6 +126,8 @@ def calculate_dilution(
         "total_factor": None,
         "steps": [],
         "available": source_concentration is not None and target_concentration > 0,
+        "minimum_volume_available": True,
+        "minimum_volume_warning": None,
     }
     if not result["available"]:
         return result
@@ -131,25 +136,69 @@ def calculate_dilution(
     if factor <= 1:
         return result
     if factor <= threshold:
-        result["steps"] = [
+        steps = [
             {
                 "factor": round(factor, 4),
                 "dna_volume": source_dna_volume,
                 "water_volume": math.ceil((factor - 1) * source_dna_volume),
             }
         ]
-        return result
-    step_factor = math.sqrt(factor)
-    result["steps"] = [
-        {
-            "factor": round(step_factor, 4),
-            "dna_volume": source_dna_volume,
-            "water_volume": math.ceil((step_factor - 1) * source_dna_volume),
-        },
-        {
-            "factor": round(step_factor, 4),
-            "dna_volume": dilution_one_volume,
-            "water_volume": math.ceil((step_factor - 1) * dilution_one_volume),
-        },
-    ]
+        step_factors = [factor]
+    else:
+        step_factor = math.sqrt(factor)
+        steps = [
+            {
+                "factor": round(step_factor, 4),
+                "dna_volume": source_dna_volume,
+                "water_volume": math.ceil((step_factor - 1) * source_dna_volume),
+            },
+            {
+                "factor": round(step_factor, 4),
+                "dna_volume": dilution_one_volume,
+                "water_volume": math.ceil((step_factor - 1) * dilution_one_volume),
+            },
+        ]
+        step_factors = [step_factor, step_factor]
+
+    if minimum_final_volume_enabled:
+        original_steps = steps
+        adjusted_steps = [
+            _scale_dilution_step(step, step_factor, minimum_final_volume)
+            for step, step_factor in zip(steps, step_factors)
+        ]
+        if len(adjusted_steps) == 2 and all(step is not None for step in adjusted_steps):
+            adjusted_steps[0] = _scale_dilution_step(
+                original_steps[0],
+                step_factors[0],
+                max(minimum_final_volume, adjusted_steps[1]["dna_volume"]),
+            )
+
+        first_step = adjusted_steps[0]
+        if first_step is None or first_step["dna_volume"] > source_available_volume:
+            result["minimum_volume_available"] = False
+            result["minimum_volume_warning"] = (
+                f"Для минимального объёма {minimum_final_volume:g} мкл требуется более "
+                f"{source_available_volume:g} мкл исходной ДНК."
+            )
+        elif all(step is not None for step in adjusted_steps):
+            steps = adjusted_steps
+
+    result["steps"] = steps
     return result
+
+
+def _scale_dilution_step(
+    step: dict[str, Any], factor: float, required_volume: float
+) -> dict[str, Any] | None:
+    dna_volume = float(step["dna_volume"])
+    water_volume = float(step["water_volume"])
+    if dna_volume + water_volume >= required_volume:
+        return step
+    if factor <= 1:
+        return None
+    water_volume = math.ceil(required_volume * (factor - 1) / factor - 1e-12)
+    dna_volume = water_volume / (factor - 1)
+    while dna_volume + water_volume < required_volume:
+        water_volume += 1
+        dna_volume = water_volume / (factor - 1)
+    return {**step, "dna_volume": dna_volume, "water_volume": water_volume}

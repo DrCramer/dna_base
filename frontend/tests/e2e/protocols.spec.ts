@@ -35,17 +35,28 @@ test('раздел протоколов открывает создание и �
   await page.getByRole('button', { name: 'Готово' }).click()
   await expect(page.getByRole('button', { name: /1 партий · \d+ объектов/ })).toBeVisible()
   await expect(page.locator('.protocol-selection-actions strong')).not.toHaveText('Выбрано: 0')
+  let minimumVolumePreviewRequested = false
   await page.route('**/api/protocols/preview', async (route) => {
+    const submittedPreview = route.request().postDataJSON()
+    const minimumVolumeEnabled = submittedPreview.dilution.minimum_final_volume_enabled
+    if (minimumVolumeEnabled) minimumVolumePreviewRequested = true
     const response = await route.fetch()
     const preview = await response.json()
     preview.dilutions = [
       { object_id: 990001, display_name: 'Без концентрации', plate_index: 1, well: 'A1', source_concentration: null, target_concentration: 0.1, total_factor: null, available: false, steps: [] },
       { object_id: 990002, display_name: 'Без разведения', plate_index: 1, well: 'B1', source_concentration: 0.05, target_concentration: 0.1, total_factor: 1, available: true, steps: [] },
-      { object_id: 990003, display_name: 'Одно разведение', plate_index: 2, well: 'A10', source_concentration: 1, target_concentration: 0.1, total_factor: 10, available: true, steps: [{ factor: 10, dna_volume: 3, water_volume: 27 }] },
-      { object_id: 990004, display_name: 'Два разведения', plate_index: 2, well: 'H12', source_concentration: 1000, target_concentration: 0.1, total_factor: 10000, available: true, steps: [{ factor: 100, dna_volume: 3, water_volume: 297 }, { factor: 100, dna_volume: 10, water_volume: 990 }] }
+      { object_id: 990003, display_name: 'Одно разведение', plate_index: 2, well: 'A10', source_concentration: 0.2, target_concentration: 0.1, total_factor: 2, available: true, steps: [{ factor: 2, dna_volume: minimumVolumeEnabled ? 8 : 3, water_volume: minimumVolumeEnabled ? 8 : 3 }] },
+      { object_id: 990004, display_name: 'Два разведения', plate_index: 2, well: 'H12', source_concentration: 1000, target_concentration: 0.1, total_factor: 10000, available: true, steps: [{ factor: 100, dna_volume: 3, water_volume: 297 }, { factor: 100, dna_volume: 10, water_volume: 990 }] },
+      { object_id: 990005, display_name: 'Превышен лимит исходной ДНК', plate_index: 2, well: 'H11', source_concentration: 1.01, target_concentration: 1, total_factor: 1.01, available: true, minimum_volume_available: false, minimum_volume_warning: 'Для минимального объёма 15 мкл требуется более 50 мкл исходной ДНК.', steps: [{ factor: 1.01, dna_volume: 3, water_volume: 1 }] }
     ]
     await route.fulfill({ response, json: preview })
   })
+  const minimumVolumeCheckbox = page.getByLabel('Минимальный объём 15 мкл')
+  await expect(minimumVolumeCheckbox).not.toBeChecked()
+  const minimumVolumeRecalculated = page.waitForResponse((response) => response.url().includes('/protocols/preview') && response.request().method() === 'POST' && response.request().postDataJSON().dilution.minimum_final_volume_enabled === true)
+  await minimumVolumeCheckbox.check()
+  await minimumVolumeRecalculated
+  expect(minimumVolumePreviewRequested).toBe(true)
   const pcrRecalculated = page.waitForResponse((response) => response.url().includes('/protocols/preview') && response.request().method() === 'POST')
   await page.locator('.protocol-stage').nth(2).getByLabel('Набор').selectOption({ index: 1 })
   await pcrRecalculated
@@ -64,7 +75,7 @@ test('раздел протоколов открывает создание и �
 
   const dilutionRows = page.locator('.protocol-sheet .protocol-dilution-wrap tbody tr')
   const filteredRowCount = await dilutionRows.count()
-  expect(filteredRowCount).toBe(2)
+  expect(filteredRowCount).toBe(3)
   await hideNoDilution.uncheck()
   const allRowsCount = await dilutionRows.count()
   expect(allRowsCount).toBeGreaterThanOrEqual(filteredRowCount)
@@ -75,6 +86,10 @@ test('раздел протоколов открывает создание и �
     return cells[6]?.textContent?.trim() === '—' && cells[8]?.textContent?.trim() === '—'
   }))
   expect(rowsWithoutDilution).toBe(false)
+  await expect(dilutionRows.filter({ hasText: 'Превышен лимит исходной ДНК' }).locator('.protocol-dilution-warning')).toHaveAttribute('title', 'Для минимального объёма 15 мкл требуется более 50 мкл исходной ДНК.')
+  const singleDilutionRow = dilutionRows.filter({ hasText: 'Одно разведение' })
+  await expect(singleDilutionRow.locator('td').nth(6)).toHaveText('8')
+  await expect(singleDilutionRow.locator('td').nth(7)).toHaveText('8')
 
   const plateColumnWidth = await page.locator('.protocol-sheet .protocol-dilution-wrap th.protocol-dilution-col-plate').evaluate((element) => element.getBoundingClientRect().width)
   const wellColumnWidth = await page.locator('.protocol-sheet .protocol-dilution-wrap th.protocol-dilution-col-well').evaluate((element) => element.getBoundingClientRect().width)
@@ -105,6 +120,10 @@ test('раздел протоколов открывает создание и �
   await expect(page.locator('.protocol-print-page').getByText('Протокол PCR', { exact: true })).toBeVisible()
   await expect(page.locator('.protocol-print-data-page .protocol-dilution-wrap th.protocol-dilution-col-plate')).toHaveCSS('white-space', 'nowrap')
   await expect(page.locator('.protocol-print-data-page .protocol-dilution-wrap table')).toHaveCSS('table-layout', 'auto')
+  await expect(page.locator('.protocol-print-root .protocol-dilution-options')).toHaveCount(0)
+  const printedSingleDilution = page.locator('.protocol-print-data-page .protocol-dilution-wrap tbody tr').filter({ hasText: 'Одно разведение' })
+  await expect(printedSingleDilution.locator('td').nth(6)).toHaveText('8')
+  await expect(printedSingleDilution.locator('td').nth(7)).toHaveText('8')
   await page.getByRole('button', { name: 'Закрыть' }).click()
 
   page.once('dialog', (dialog) => dialog.accept())
