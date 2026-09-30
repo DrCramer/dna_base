@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 StageType = Literal["dna_extraction", "realtime", "pcr", "electrophoresis"]
@@ -48,6 +48,15 @@ class ProtocolDilutionSettings(BaseModel):
     source_available_volume: float = Field(default=50, gt=0)
 
 
+class ProtocolSelectionSettings(BaseModel):
+    case_year: int | None = None
+    party_ids: list[int] = Field(default_factory=list)
+    rcsme_from: str | None = None
+    rcsme_to: str | None = None
+    description: str | None = None
+    numbers: list[str] = Field(default_factory=list)
+
+
 class ProtocolPreviewRequest(BaseModel):
     protocol_date: date
     protocol_no: int = Field(ge=1)
@@ -57,6 +66,12 @@ class ProtocolPreviewRequest(BaseModel):
     stages: list[ProtocolStageInput] = Field(default_factory=list)
     plate_rules: ProtocolPlateRules = Field(default_factory=ProtocolPlateRules)
     dilution: ProtocolDilutionSettings = Field(default_factory=ProtocolDilutionSettings)
+    selection: ProtocolSelectionSettings | None = None
+
+    @field_validator("object_ids")
+    @classmethod
+    def unique_object_ids(cls, value: list[int]) -> list[int]:
+        return list(dict.fromkeys(value))
 
 
 class ProtocolCreateRequest(ProtocolPreviewRequest):

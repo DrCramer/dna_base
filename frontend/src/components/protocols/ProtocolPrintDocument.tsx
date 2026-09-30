@@ -1,5 +1,6 @@
 import type { Employee, ProtocolPlateRules, ProtocolPreview, ProtocolStageSettings, ProtocolStageType } from '../../api/types'
 import { ProtocolPlate } from './ProtocolPlate'
+import { protocolObjectIds } from './protocolSelection'
 import {
   dilutionPageSize,
   dilutionSupplementPageCount,
@@ -48,6 +49,7 @@ function snapshotPerformers(preview: ProtocolPreview, stageType: ProtocolStageTy
 }
 
 export function ProtocolPrintDocument({ protocolDate, protocolNo, name, stages, selectedStageTypes, plateRules, preview, employees, dilutionView, onDilutionSort }: Props) {
+  const objectCount = protocolObjectIds(preview.objects).length
   const orderedStageTypes = (Object.keys(stageLabels) as ProtocolStageType[]).filter((stageType) => selectedStageTypes.includes(stageType))
   const pages = orderedStageTypes.flatMap((stageType) => {
     const layout = stageType === 'pcr' || stageType === 'electrophoresis' ? preview.layouts.pcr : preview.layouts.source
@@ -58,7 +60,7 @@ export function ProtocolPrintDocument({ protocolDate, protocolNo, name, stages, 
   const hasCalculations = protocolReagentRows(preview, 'pcr').length > 0 || protocolReagentRows(preview, 'electrophoresis').length > 0
   return (
     <div className="protocol-print-pages">
-      {pages.map(({ stageType, layout, plate }, pageIndex) => {
+      {pages.map(({ stageType, plate }, pageIndex) => {
         const stage = stages.find((item) => item.stage_type === stageType)
         const savedNames = snapshotPerformers(preview, stageType)
         const currentNames = (stage?.performer_ids || []).flatMap((id) => {
@@ -76,7 +78,7 @@ export function ProtocolPrintDocument({ protocolDate, protocolNo, name, stages, 
                 <div><span>Дата</span><strong>{displayDate(protocolDate)}</strong></div>
                 <div><span>№</span><strong>{protocolNo}</strong></div>
                 <div className="protocol-print-name"><span>Название</span><strong>{name || '—'}</strong></div>
-                <div><span>Объектов / максимум</span><strong>{plate.sample_count} / {layout.capacity}</strong></div>
+                <div><span>Объектов</span><strong>{objectCount}</strong></div>
               </div>
               <section className="protocol-print-stage">
                 <h2>{stageLabels[stageType]}</h2>
@@ -112,7 +114,7 @@ export function ProtocolPrintDocument({ protocolDate, protocolNo, name, stages, 
         <div className="protocol-print-page-label">Страница {pages.length + dilutionPages.length + 1} · Расчёты</div>
         <article className="protocol-print-page protocol-print-data-page">
           <h1>Расчёты · {name || 'Протокол'}</h1>
-          <div className="protocol-print-meta"><div><span>Дата</span><strong>{displayDate(protocolDate)}</strong></div><div><span>№</span><strong>{protocolNo}</strong></div><div className="protocol-print-name"><span>Название</span><strong>{name || '—'}</strong></div><div><span>Объектов</span><strong>{preview.selected_count}</strong></div></div>
+          <div className="protocol-print-meta"><div><span>Дата</span><strong>{displayDate(protocolDate)}</strong></div><div><span>№</span><strong>{protocolNo}</strong></div><div className="protocol-print-name"><span>Название</span><strong>{name || '—'}</strong></div><div><span>Объектов</span><strong>{objectCount}</strong></div></div>
           <ProtocolCalculationTables preview={preview} />
         </article>
       </div> : null}

@@ -847,6 +847,15 @@ export interface ProtocolPlateRules {
   nc_enabled: boolean
 }
 
+export interface ProtocolSelectionSettings {
+  case_year: number | null
+  party_ids: number[]
+  rcsme_from: string | null
+  rcsme_to: string | null
+  description: string | null
+  numbers: string[]
+}
+
 export interface ProtocolPayload {
   protocol_date: string
   protocol_no: number
@@ -855,6 +864,7 @@ export interface ProtocolPayload {
   object_ids: number[]
   stages: ProtocolStageSettings[]
   plate_rules: ProtocolPlateRules
+  selection?: ProtocolSelectionSettings | null
   dilution: {
     enabled: boolean
     target_concentration: number

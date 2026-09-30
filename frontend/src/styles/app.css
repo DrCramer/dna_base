@@ -42,6 +42,8 @@
 .protocol-selection-panel { border: 1px solid var(--border); background: var(--panel); margin-bottom: 12px; }
 .protocol-selection-summary { width: 100%; border: 0; border-radius: 0; padding: 10px 12px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; background: var(--panel); color: var(--text); text-align: left; }
 .protocol-selection-summary span { color: var(--muted); }
+.protocol-selection-summary > span { min-width: 0; }
+.protocol-selection-caption { display: block; margin-top: 4px; overflow-wrap: anywhere; }
 .protocol-selection-summary em { color: var(--accent); font-style: normal; }
 .protocol-selection-body { border-top: 1px solid var(--border); padding: 10px 12px 12px; }
 .protocol-year { display: inline-flex; align-items: center; gap: 7px; margin-bottom: 9px; font-weight: 650; }
@@ -224,6 +226,8 @@
 
 @media (max-width: 680px) {
   .protocol-toolbar { justify-content: flex-start; }
+  .protocol-selection-summary { grid-template-columns: minmax(0, 1fr) auto; }
+  .protocol-selection-summary > span { grid-column: 1 / -1; grid-row: 2; }
   .protocol-selector-row, .protocol-list-filters, .protocol-list-advanced > div { grid-template-columns: 1fr; }
   .protocol-selection-actions strong { width: 100%; margin-left: 0; }
   .protocol-print-root { padding: 8px; }

@@ -5,6 +5,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from app.services.protocols import protocol_object_count
+
 
 THIN = Side(style="thin", color="000000")
 
@@ -48,7 +50,7 @@ def build_protocol_workbook(snapshot: dict[str, Any]) -> bytes:
     overview.merge_cells("A1:H1")
     overview["A1"].font = Font(bold=True, size=15)
     overview["A1"].alignment = Alignment(horizontal="center")
-    overview.append(["Дата", protocol["protocol_date"], "№", protocol["protocol_no"], "Название", protocol["name"], "Объектов", len(snapshot["objects"])])
+    overview.append(["Дата", protocol["protocol_date"], "№", protocol["protocol_no"], "Название", protocol["name"], "Объектов", protocol_object_count(snapshot["objects"])])
     labels = {"dna_extraction": "Выделение", "realtime": "Real Time", "pcr": "PCR", "electrophoresis": "Форез"}
     for stage in snapshot["stages"]:
         names = ", ".join(item["display_name"] for item in stage.get("performers", []))

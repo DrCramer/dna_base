@@ -44,6 +44,7 @@ from app.services.protocol_excel import build_protocol_workbook
 from app.services.protocol_plate import natural_key
 from app.services.protocols import (
     build_protocol_snapshot,
+    protocol_object_count,
     replace_protocol_relations,
     suggested_protocol_meta,
 )
@@ -548,7 +549,7 @@ async def list_protocols(
     for protocol in protocols:
         snapshot = protocol.snapshot_json or {}
         objects = snapshot.get("objects", [])
-        items.append(ProtocolSummaryOut(id=protocol.id, series_key=protocol.series_key, protocol_no=protocol.protocol_no, protocol_date=protocol.protocol_date, name=protocol.name, status=protocol.status, revision_no=protocol.revision_no, object_count=len(objects), party_numbers=sorted({str(item.get("party_no")) for item in objects if item.get("party_no")}, key=natural_key), stage_types=[item["stage_type"] for item in snapshot.get("stages", []) if item.get("enabled")], author=authors.get(protocol.created_by_user_id), updated_at=protocol.updated_at))
+        items.append(ProtocolSummaryOut(id=protocol.id, series_key=protocol.series_key, protocol_no=protocol.protocol_no, protocol_date=protocol.protocol_date, name=protocol.name, status=protocol.status, revision_no=protocol.revision_no, object_count=protocol_object_count(objects), party_numbers=sorted({str(item.get("party_no")) for item in objects if item.get("party_no")}, key=natural_key), stage_types=[item["stage_type"] for item in snapshot.get("stages", []) if item.get("enabled")], author=authors.get(protocol.created_by_user_id), updated_at=protocol.updated_at))
     return ProtocolListOut(items=items, total=total, limit=limit, offset=offset)
 
 

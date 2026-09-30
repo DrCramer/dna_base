@@ -37,6 +37,14 @@ from app.services.realtime_details import get_latest_realtime_details
 STAGE_ORDER = ("dna_extraction", "realtime", "pcr", "electrophoresis")
 
 
+def protocol_object_count(objects: list[dict[str, Any]]) -> int:
+    return len({
+        item["id"] if item.get("id") is not None else item.get("object_id")
+        for item in objects
+        if item.get("id") is not None or item.get("object_id") is not None
+    })
+
+
 async def suggested_protocol_meta(session: AsyncSession, protocol_date: date) -> dict[str, Any]:
     current = (
         await session.execute(
@@ -290,11 +298,12 @@ async def build_protocol_snapshot(
         "layouts": layouts,
         "calculations": calculations,
         "dilution_settings": dilution_settings,
+        "selection": payload.selection.model_dump() if payload.selection else None,
         "dilutions": dilutions,
         "warnings": warnings,
     }
     return {
-        "selected_count": len(objects),
+        "selected_count": protocol_object_count(objects),
         "capacity": plate_capacity(rules),
         "max_capacity": 96,
         "objects": objects,

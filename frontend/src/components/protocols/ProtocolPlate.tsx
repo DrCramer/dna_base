@@ -7,7 +7,7 @@ export function ProtocolPlate({ plate, title }: { plate: Plate; title: string })
   const cells = new Map(plate.wells.map((item) => [item.well, item]))
   return (
     <div className="protocol-plate-block">
-      <div className="protocol-plate-title"><strong>{title}</strong><span>{plate.sample_count} объектов</span></div>
+      <div className="protocol-plate-title"><strong>{title}</strong><span>Образцов на плашке: {plate.sample_count}</span></div>
       <div className="protocol-plate-grid" role="grid" aria-label={title}>
         <div className="protocol-well-axis" />
         {columns.map((column) => <div className="protocol-well-axis" key={column}>{column}</div>)}
