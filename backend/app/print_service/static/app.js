@@ -34,6 +34,7 @@ const state = {
   mode: null,
   excelFile: null,
   excelFiles: [],
+  excelOrderPending: false,
   canBuild: false,
   currentStep: "documents",
   pollTimer: null,
@@ -771,8 +772,11 @@ function renderExcelState() {
     .map((file, index) => `<span><span title="${escapeAttr(file.name)}">${index + 1}. ${escapeHtml(file.name)}</span></span>`)
     .join("");
   els.clearExcelFilesButton.hidden = state.excelFiles.length === 0;
-  els.validateExcelButton.disabled = !state.jobId || state.excelFiles.length === 0;
-  els.sortExcelButton.disabled = !state.jobId || state.lastValidation?.mode !== "excel";
+  const hasExcelOrder = state.lastValidation?.mode === "excel" || state.excelFiles.length > 0;
+  els.validateExcelButton.disabled = state.excelOrderPending || !state.jobId || !hasExcelOrder;
+  els.sortExcelButton.disabled = state.excelOrderPending || !state.jobId || !hasExcelOrder;
+  els.xlsxInput.disabled = state.excelOrderPending;
+  els.clearExcelFilesButton.disabled = state.excelOrderPending;
 }
 
 function registrationPayload() {
@@ -1425,52 +1429,82 @@ async function validateTextJob() {
   }
 }
 
-async function validateExcelJob() {
-  if (!state.jobId || !state.excelFiles.length) return;
-  const stampingEnabled = els.stampEnabledInput.checked;
-  setStatus("Проверяем Excel-файлы…", "info");
-  els.validateExcelButton.disabled = true;
-  const formData = new FormData();
-  state.excelFiles.forEach((file) => formData.append("files", file, file.name));
-  formData.append("stamping_json", JSON.stringify(collectExcelValidationStampingConfig()));
-  try {
-    const response = await fetch(`/api/print/jobs/${state.jobId}/validate/excel`, {
+async function requestExcelValidation({ orderOnly = false } = {}) {
+  const stamping = collectExcelValidationStampingConfig();
+  if (orderOnly) stamping.enabled = false;
+  let response;
+  if (state.lastValidation?.mode === "excel") {
+    // Повторная проверка сохраняет рабочий порядок, включая явную сортировку.
+    const groups = {};
+    (state.lastValidation.groups || []).forEach((group) => {
+      groups[group.id] = (group.validation?.entries || []).map((entry) => entry.source_number_original || entry.number);
+    });
+    response = await fetch(`/api/print/jobs/${state.jobId}/sort/excel`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ groups, stamping }),
+    });
+  } else {
+    const formData = new FormData();
+    state.excelFiles.forEach((file) => formData.append("files", file, file.name));
+    formData.append("stamping_json", JSON.stringify(stamping));
+    response = await fetch(`/api/print/jobs/${state.jobId}/validate/excel`, {
       method: "POST",
       body: formData,
     });
-    const data = await readJson(response);
-    if (!response.ok) throw new Error(data.detail || "Не удалось проверить Excel");
-    state.mode = "excel";
-    state.lastValidation = data;
-    state.lastJob = { ...(state.lastJob || {}), status: "validated", validation: data, build: null };
-    state.canBuild = data.can_build;
-    state.activeFilter = getValidationStats(data).errors ? "errors" : "all";
-    state.resultLimit = 160;
-    persistState();
-    renderModePanels();
-    renderValidation(data);
+  }
+  const data = await readJson(response);
+  if (!response.ok) throw new Error(data.detail || "Не удалось проверить Excel");
+  return data;
+}
+
+function applyExcelValidation(data) {
+  state.mode = "excel";
+  state.lastValidation = data;
+  state.lastJob = { ...(state.lastJob || {}), status: "validated", validation: data, build: null };
+  state.canBuild = data.can_build;
+  state.activeFilter = getValidationStats(data).errors ? "errors" : "all";
+  state.resultLimit = 160;
+  persistState();
+  renderModePanels();
+  renderValidation(data);
+}
+
+async function validateExcelJob() {
+  if (state.excelOrderPending || !state.jobId || (!state.excelFiles.length && state.lastValidation?.mode !== "excel")) return;
+  const stampingEnabled = els.stampEnabledInput.checked;
+  state.excelOrderPending = true;
+  renderExcelState();
+  setStatus("Проверяем Excel-файлы…", "info");
+  try {
+    applyExcelValidation(await requestExcelValidation());
     setStep(stampingEnabled ? "order" : "check");
   } catch (error) {
     renderValidationError(error.message);
     setStep("check");
   } finally {
+    state.excelOrderPending = false;
     renderModePanels();
     updateHeader();
   }
 }
 
 async function sortExcelGroupsNaturally() {
-  if (!state.jobId || state.lastValidation?.mode !== "excel") return;
-  const groups = {};
-  (state.lastValidation.groups || []).forEach((group) => {
-    const values = (group.validation?.entries || []).map((entry) => entry.source_number_original || entry.number);
-    groups[group.id] = naturalSortValues(values);
-  });
-  const stamping = collectStampingConfig();
-  stamping.enabled = Boolean(state.lastValidation.stamping?.config?.enabled);
-  els.sortExcelButton.disabled = true;
+  if (state.excelOrderPending || !state.jobId || (!state.excelFiles.length && state.lastValidation?.mode !== "excel")) return;
+  state.excelOrderPending = true;
+  renderExcelState();
   setStatus("Сортируем столбцы…", "info");
   try {
+    if (state.lastValidation?.mode !== "excel") {
+      applyExcelValidation(await requestExcelValidation({ orderOnly: true }));
+    }
+    const groups = {};
+    (state.lastValidation.groups || []).forEach((group) => {
+      const values = (group.validation?.entries || []).map((entry) => entry.source_number_original || entry.number);
+      groups[group.id] = naturalSortValues(values);
+    });
+    const stamping = collectStampingConfig();
+    stamping.enabled = Boolean(state.lastValidation.stamping?.config?.enabled);
     const response = await fetch(`/api/print/jobs/${state.jobId}/sort/excel`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1478,16 +1512,13 @@ async function sortExcelGroupsNaturally() {
     });
     const data = await readJson(response);
     if (!response.ok) throw new Error(data.detail || "Не удалось отсортировать Excel");
-    state.lastValidation = data;
-    state.lastJob = { ...(state.lastJob || {}), status: "validated", validation: data, build: null };
-    state.canBuild = data.can_build;
-    renderModePanels();
-    renderValidation(data);
+    applyExcelValidation(data);
     setStep("order");
     showToast("Столбцы отсортированы по возрастанию");
   } catch (error) {
     showToast(error.message);
   } finally {
+    state.excelOrderPending = false;
     renderExcelState();
     updateHeader();
   }
