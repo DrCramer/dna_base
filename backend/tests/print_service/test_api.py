@@ -305,10 +305,10 @@ def test_excel_build_uses_range_names_in_files_zip_and_report(client, monkeypatc
     assert "1-(ее5968).pdf" in report
     assert "2-(ее6032).pdf" in report
     workbook = load_workbook(main.get_job_dir(job_id) / state["number_mapping_xlsx"], read_only=True, data_only=True)
-    assert list(workbook["Сопоставление"].iter_rows(values_only=True))[1:] == [
-        ("ее5968", None),
-        ("ее6032", None),
-    ]
+    sheet = workbook["Сопоставление"]
+    assert list(sheet.iter_rows(min_row=3, values_only=True)) == [("ее5968", None, None, "ее6032", None)]
+    assert sheet["A1"].value == "Столбец A · документов: 1"
+    assert sheet["D1"].value == "Столбец B · документов: 1"
     workbook.close()
 
 
@@ -602,12 +602,10 @@ def test_excel_validation_accepts_multiple_files_and_sorts_groups_independently(
     ]
     state = main.load_state(job_id)
     workbook = load_workbook(main.get_job_dir(job_id) / state["number_mapping_xlsx"], read_only=True, data_only=True)
-    assert list(workbook["Сопоставление"].iter_rows(values_only=True))[1:] == [
-        ("ии1", None),
-        ("ии2", None),
-        ("ии10", None),
-        ("нн2", None),
-        ("нн10", None),
+    assert list(workbook["Сопоставление"].iter_rows(min_row=3, values_only=True)) == [
+        ("ии1", None, None, "нн2", None),
+        ("ии2", None, None, "нн10", None),
+        ("ии10", None, None, None, None),
     ]
     workbook.close()
 
