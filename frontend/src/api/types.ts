@@ -856,6 +856,70 @@ export interface ProtocolSelectionSettings {
   numbers: string[]
 }
 
+export interface ProtocolPipettingConstraints {
+  water_increment_ul?: number | null
+  water_min_ul?: number | null
+  water_max_ul?: number | null
+  dna_increment_ul?: number | null
+  dna_min_ul?: number | null
+  dna_max_ul?: number | null
+  first_dilution_reserve_ul?: number
+}
+
+export interface ProtocolDilutionSettings {
+  enabled: boolean
+  target_concentration: number
+  source_dna_volume: number
+  dilution_one_volume: number
+  threshold: number
+  minimum_final_volume_enabled: boolean
+  minimum_final_volume?: number
+  source_available_volume?: number
+  optimize_water_volumes?: boolean
+  allowed_concentration_error_percent?: number
+  preferred_water_step_ul?: number
+  optimization_priority?: 'fewest_volumes' | 'minimum_error'
+  max_under_target_pct?: number | null
+  max_over_target_pct?: number | null
+  pipetting?: ProtocolPipettingConstraints
+}
+
+export interface ProtocolDilutionOptimization {
+  enabled: boolean
+  status: 'optimized' | 'unchanged' | 'blocked'
+  needs_review: boolean
+  actual_final_concentration: number
+  relative_error_percent: number
+  target_concentration: number
+  baseline_actual_final_concentration: number
+  baseline_relative_error_percent: number
+  baseline_out_of_tolerance: boolean
+  reason: string | null
+  reason_code: string | null
+  first_dilution_remaining_volume: number | null
+}
+
+export interface ProtocolWaterBatch {
+  water_volume: number
+  object_count: number
+  objects: Array<{ object_id: number; display_name: string | null; plate_index: number | null; well: string | null; needs_review: boolean }>
+}
+
+export interface ProtocolDilutionOptimizationSummary {
+  enabled: boolean
+  object_count: number
+  active_object_count: number
+  unique_water_volumes_before: number
+  unique_water_volumes_after: number
+  optimized_object_count: number
+  unchanged_object_count: number
+  blocked_object_count: number
+  excluded_object_count: number
+  max_absolute_error_percent: number
+  batch_groups_first: ProtocolWaterBatch[]
+  batch_groups_second: ProtocolWaterBatch[]
+}
+
 export interface ProtocolPayload {
   protocol_date: string
   protocol_no: number
@@ -865,16 +929,7 @@ export interface ProtocolPayload {
   stages: ProtocolStageSettings[]
   plate_rules: ProtocolPlateRules
   selection?: ProtocolSelectionSettings | null
-  dilution: {
-    enabled: boolean
-    target_concentration: number
-    source_dna_volume: number
-    dilution_one_volume: number
-    threshold: number
-    minimum_final_volume_enabled: boolean
-    minimum_final_volume?: number
-    source_available_volume?: number
-  }
+  dilution: ProtocolDilutionSettings
 }
 
 export interface ProtocolWell {
@@ -915,6 +970,7 @@ export interface ProtocolPreview {
     electrophoresis: Record<string, unknown>
   }
   dilutions: Array<Record<string, unknown>>
+  dilution_optimization?: ProtocolDilutionOptimizationSummary | null
   warnings: string[]
   snapshot: Record<string, unknown>
 }

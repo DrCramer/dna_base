@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 StageType = Literal["dna_extraction", "realtime", "pcr", "electrophoresis"]
@@ -37,15 +37,41 @@ class ProtocolPlateRules(BaseModel):
     nc_enabled: bool = True
 
 
+class ProtocolPipettingConstraints(BaseModel):
+    water_increment_ul: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    water_min_ul: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    water_max_ul: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    dna_increment_ul: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    dna_min_ul: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    dna_max_ul: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    first_dilution_reserve_ul: float = Field(default=0, ge=0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def valid_ranges(self):
+        for prefix in ("water", "dna"):
+            lower = getattr(self, f"{prefix}_min_ul")
+            upper = getattr(self, f"{prefix}_max_ul")
+            if lower is not None and upper is not None and lower > upper:
+                raise ValueError("Минимальный объём не может превышать максимальный")
+        return self
+
+
 class ProtocolDilutionSettings(BaseModel):
     enabled: bool = True
-    target_concentration: float = Field(default=0.1, gt=0)
-    source_dna_volume: float = Field(default=3, gt=0)
-    dilution_one_volume: float = Field(default=10, gt=0)
-    threshold: float = Field(default=100, gt=1)
+    target_concentration: float = Field(default=0.1, gt=0, allow_inf_nan=False)
+    source_dna_volume: float = Field(default=3, gt=0, allow_inf_nan=False)
+    dilution_one_volume: float = Field(default=10, gt=0, allow_inf_nan=False)
+    threshold: float = Field(default=100, gt=1, allow_inf_nan=False)
     minimum_final_volume_enabled: bool = False
-    minimum_final_volume: float = Field(default=15, gt=0)
-    source_available_volume: float = Field(default=50, gt=0)
+    minimum_final_volume: float = Field(default=15, gt=0, allow_inf_nan=False)
+    source_available_volume: float = Field(default=50, gt=0, allow_inf_nan=False)
+    optimize_water_volumes: bool = False
+    allowed_concentration_error_percent: float = Field(default=5, ge=0, lt=100, allow_inf_nan=False)
+    preferred_water_step_ul: int = Field(default=10, ge=1, le=1000)
+    optimization_priority: Literal["fewest_volumes", "minimum_error"] = "fewest_volumes"
+    max_under_target_pct: float | None = Field(default=None, ge=0, lt=100, allow_inf_nan=False)
+    max_over_target_pct: float | None = Field(default=None, ge=0, lt=100, allow_inf_nan=False)
+    pipetting: ProtocolPipettingConstraints = Field(default_factory=ProtocolPipettingConstraints)
 
 
 class ProtocolSelectionSettings(BaseModel):
@@ -91,6 +117,7 @@ class ProtocolPreviewOut(BaseModel):
     layouts: dict[str, Any]
     calculations: dict[str, Any]
     dilutions: list[dict[str, Any]]
+    dilution_optimization: dict[str, Any] | None = None
     warnings: list[str]
     snapshot: dict[str, Any]
 

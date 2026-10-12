@@ -12,7 +12,7 @@ test('уникальные ID и TXT используют порядок snapsho
   expect(selectionCaption({ ...selection, rcsme_from: null, rcsme_to: '3020-1' })).toBe('Диапазон номеров: до 3020-1')
 })
 
-async function fixture(page: Page) {
+async function fixture(page: Page, transform: (preview: ProtocolPreview, payload: ProtocolPayload) => ProtocolPreview = (preview) => preview) {
   const year = new Date().getFullYear()
   const objects: ProtocolObject[] = Array.from({ length: 120 }, (_, index) => ({
     id: index + 1, party_id: 205, party_no: '205', case_year: year, rcsme_reg_no: `${3001 + index}-1`,
@@ -69,7 +69,7 @@ async function fixture(page: Page) {
     const layouts = { source: { layout_key: 'source', capacity: 95, rules: {}, plates, warnings: [] }, pcr: { layout_key: 'pcr', capacity: 95, rules: {}, plates, warnings: [] } }
     const stages = payload.stages.map((stage) => ({ ...stage, performers: [] }))
     const calculations = { pcr: [], electrophoresis: { components: [] } }
-    return { selected_count: selected.length, capacity: 95, max_capacity: 96, objects: selected, stages, layouts, calculations, dilutions: [], warnings: [], snapshot: { protocol: payload, objects: selected, stages, layouts, calculations, dilutions: [], warnings: [], selection: payload.selection, plate_rules: payload.plate_rules, dilution_settings: payload.dilution } }
+    return transform({ selected_count: selected.length, capacity: 95, max_capacity: 96, objects: selected, stages, layouts, calculations, dilutions: [], warnings: [], snapshot: { protocol: payload, objects: selected, stages, layouts, calculations, dilutions: [], warnings: [], selection: payload.selection, plate_rules: payload.plate_rules, dilution_settings: payload.dilution } }, payload)
   }
   await page.route('**/api/protocols/preview', async (route) => {
     previewRequests++
@@ -224,4 +224,95 @@ test('запоздавший resolve не заменяет выбор новог
   await expect(page.getByRole('button', { name: 'Скачать список номеров' })).toBeEnabled()
   await page.waitForTimeout(1300)
   await expect(page.locator('.protocol-selection-actions strong')).toHaveText('Выбрано: 1')
+})
+
+test('удобные объёмы воды сохраняют лунки, настройки и значения печати', async ({ page }, testInfo) => {
+  test.setTimeout(60_000)
+  const state = await fixture(page, (preview, payload) => {
+    const enabled = payload.dilution.optimize_water_volumes ?? false
+    const rows = preview.objects.map((object) => {
+      const index = Number(object.id) - 1
+      const minimum = payload.dilution.minimum_final_volume_enabled
+      const source = index < 5 ? (66 + index) / 30 : index === 5 ? 0.2 : index === 6 ? 1000 : null
+      const baseline = index < 5 ? [{ dna_volume: 3, water_volume: 63 + index }] : index === 5 ? [{ dna_volume: minimum ? 8 : 3, water_volume: minimum ? 8 : 3 }] : index === 6 ? [{ dna_volume: 3, water_volume: 297 }, { dna_volume: 10, water_volume: 990 }] : []
+      const steps = baseline.map((step) => ({ ...step, water_volume: enabled && index < 5 ? 65 : step.water_volume }))
+      const well = preview.layouts.pcr.plates.flatMap((plate) => plate.wells).find((well) => well.object_id === object.id)
+      const actual = steps.reduce((concentration, step) => concentration * step.dna_volume / (step.dna_volume + step.water_volume), source || 0)
+      const before = baseline.reduce((concentration, step) => concentration * step.dna_volume / (step.dna_volume + step.water_volume), source || 0)
+      const changed = steps.some((step, index) => step.water_volume !== baseline[index].water_volume)
+      return { object_id: Number(object.id), display_name: String(object.rcsme_reg_no), plate_index: well?.plate_index || null, well: well?.well || null, source_concentration: source, target_concentration: 0.1, total_factor: source ? source / 0.1 : null, available: source !== null, steps,
+        ...(enabled && source !== null ? { baseline_steps: baseline, optimization: { enabled: true, status: changed ? 'optimized' as const : 'unchanged' as const, needs_review: false, actual_final_concentration: actual, relative_error_percent: 100 * (actual / 0.1 - 1), target_concentration: 0.1, baseline_actual_final_concentration: before, baseline_relative_error_percent: 100 * (before / 0.1 - 1), baseline_out_of_tolerance: false, reason: null, reason_code: null, first_dilution_remaining_volume: index === 6 ? 290 : null } } : {}) }
+    })
+    const groups = (step: number) => {
+      const volumes = Array.from(new Set(rows.flatMap((row) => row.steps[step] ? [row.steps[step].water_volume] : []))).sort((a, b) => a - b)
+      return volumes.map((water_volume) => {
+        const objects = rows.filter((row) => row.steps[step]?.water_volume === water_volume).map((row) => ({ object_id: row.object_id, display_name: row.display_name, plate_index: row.plate_index, well: row.well, needs_review: false }))
+        return { water_volume, object_count: objects.length, objects }
+      })
+    }
+    const summary = enabled ? { enabled: true, object_count: rows.length, active_object_count: Math.min(7, rows.length), unique_water_volumes_before: new Set(rows.flatMap((row) => (row.baseline_steps || []).map((step) => step.water_volume))).size, unique_water_volumes_after: new Set(rows.flatMap((row) => row.steps.map((step) => step.water_volume))).size, optimized_object_count: rows.filter((row) => row.optimization?.status === 'optimized').length, unchanged_object_count: rows.filter((row) => row.optimization?.status === 'unchanged').length, blocked_object_count: 0, excluded_object_count: Math.max(0, rows.length - 7), max_absolute_error_percent: Math.max(0, ...rows.map((row) => Math.abs(row.optimization?.relative_error_percent || 0))), batch_groups_first: groups(0), batch_groups_second: groups(1) } : null
+    return { ...preview, dilutions: rows, dilution_optimization: summary, snapshot: { ...preview.snapshot, dilutions: rows, dilution_optimization: summary } }
+  })
+  await page.getByRole('button', { name: 'Партии протокола' }).click()
+  await page.locator('.multi-party-modal input[type=checkbox]').check()
+  await page.getByRole('button', { name: 'Готово' }).click()
+  await page.getByPlaceholder('№ рег РЦСМЭ от').fill('3001-1')
+  await page.getByPlaceholder('№ рег РЦСМЭ до').fill('3007-1')
+  await expect(page.locator('.protocol-selection-actions strong')).toHaveText('Выбрано: 7')
+  await expect(page.getByLabel('Удобные объёмы воды')).not.toBeChecked()
+  await expect(page.getByRole('button', { name: 'Предпросмотр печати' })).toBeEnabled()
+  const gridBefore = await page.locator('.protocol-sheet .protocol-well span').allTextContents()
+  await page.getByLabel('Удобные объёмы воды').check()
+  await page.getByText('Разведения', { exact: true }).click()
+  await expect(page.locator('.protocol-water-summary')).toContainText('8 → 4')
+  await expect(page.locator('.protocol-water-summary')).toContainText('4 из 7 объектов')
+  expect(await page.locator('.protocol-sheet .protocol-well span').allTextContents()).toEqual(gridBefore)
+  const dilutionRows = page.locator('.protocol-sheet .protocol-dilution-wrap tbody tr')
+  const first = dilutionRows.filter({ hasText: '3001-1' })
+  await expect(first.locator('td').nth(7)).toHaveText('65')
+  await expect(first.locator('td').nth(7)).toHaveAttribute('title', /До округления: 63 мкл\nДля работы: 65 мкл\nРасчётная концентрация:/)
+  await expect(first.locator('td').nth(4)).toHaveText('0.1')
+  const coordinates = await first.locator('td').allTextContents()
+  await page.getByText('Настройки округления', { exact: true }).click()
+  await expect(page.getByLabel('Допуск концентрации, %')).toHaveValue('5')
+  await page.getByLabel('Предпочтительный шаг воды, мкл').selectOption('5')
+  await page.getByText('Ограничения дозирования', { exact: true }).click()
+  await page.getByLabel('Дискретность H₂O, мкл').pressSequentially('0.1')
+  await expect(page.getByLabel('Дискретность H₂O, мкл')).toHaveValue('0.1')
+  await expect(page.getByRole('button', { name: 'Предпросмотр печати' })).toBeEnabled()
+  await page.getByLabel('Минимальный объём 15 мкл').check()
+  await expect(dilutionRows.filter({ hasText: '3006-1' }).locator('td').nth(6)).toHaveText('8')
+  await expect(dilutionRows.filter({ hasText: '3006-1' }).locator('td').nth(7)).toHaveText('8')
+  await page.locator('.protocol-sheet .protocol-dilution-sort').first().click()
+  await expect(dilutionRows.first()).toContainText('3006-1')
+  expect((await first.locator('td').allTextContents()).slice(0, 3)).toEqual(coordinates.slice(0, 3))
+  await page.getByText('Группы объёмов воды', { exact: true }).click()
+  await expect(page.getByText('65 мкл — 5 объектов', { exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('water-desktop.png'), fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.screenshot({ path: testInfo.outputPath('water-mobile.png'), fullPage: true })
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await expect(page.getByRole('button', { name: 'Сохранить черновик' })).toBeEnabled()
+  await page.getByRole('button', { name: 'Сохранить черновик' }).click()
+  await expect(page.getByRole('heading', { name: /версия 1/ })).toBeVisible()
+  const saved = state.saved()!
+  expect(saved.snapshot.dilution_settings).toMatchObject({ optimize_water_volumes: true, minimum_final_volume_enabled: true, preferred_water_step_ul: 5, allowed_concentration_error_percent: 5 })
+  expect((saved.snapshot.dilution_settings as ProtocolPayload['dilution']).pipetting).toMatchObject({ water_increment_ul: 0.1 })
+  await page.getByRole('button', { name: 'Сохранённые', exact: true }).click()
+  await page.getByRole('button', { name: saved.name, exact: true }).click()
+  await expect(page.getByLabel('Удобные объёмы воды')).toBeChecked()
+  await page.getByText('Разведения', { exact: true }).click()
+  await expect(first.locator('td').nth(7)).toHaveText('65')
+  const working = await dilutionRows.evaluateAll((rows) => rows.map((row) => [row.children[2].textContent, row.children[6].textContent, row.children[7].textContent, row.children[8].textContent, row.children[9].textContent]))
+  await page.getByRole('button', { name: 'Предпросмотр печати', exact: true }).click()
+  await page.getByRole('button', { name: 'Предпросмотр', exact: true }).click()
+  const printRows = page.locator('.protocol-print-root .protocol-dilution-wrap tbody tr')
+  const printed = await printRows.evaluateAll((rows) => rows.map((row) => [row.children[2].textContent, row.children[6].textContent, row.children[7].textContent, row.children[8].textContent, row.children[9].textContent]))
+  expect(printed).toEqual(working)
+  await expect(page.locator('.protocol-print-root .protocol-dilution-audit tbody tr')).toHaveCount(7)
+  await expect(page.locator('.protocol-print-root .protocol-dilution-options')).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('water-print.png'), fullPage: true })
+  await page.locator('.protocol-print-data-page').filter({ has: page.getByRole('heading', { name: /Округление разведений/ }) }).screenshot({ path: testInfo.outputPath('water-audit.png') })
+  await page.locator('.protocol-print-data-page').filter({ has: page.getByRole('heading', { name: /^Разведения ·/ }) }).screenshot({ path: testInfo.outputPath('water-dilutions.png') })
+  expect(await page.locator('.protocol-print-page').evaluateAll((pages) => pages.every((page) => page.scrollWidth <= page.clientWidth + 1))).toBe(true)
 })

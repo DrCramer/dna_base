@@ -103,11 +103,20 @@ def test_dilution_settings_snapshot_values_round_trip():
         "minimum_final_volume_enabled": True,
         "minimum_final_volume": 15,
         "source_available_volume": 50,
+        "optimize_water_volumes": False,
+        "allowed_concentration_error_percent": 5,
+        "preferred_water_step_ul": 10,
+        "optimization_priority": "fewest_volumes",
+        "max_under_target_pct": None,
+        "max_over_target_pct": None,
+        "pipetting": {"water_increment_ul": None, "water_min_ul": None, "water_max_ul": None, "dna_increment_ul": None, "dna_min_ul": None, "dna_max_ul": None, "first_dilution_reserve_ul": 0},
     }
     restored = ProtocolDilutionSettings.model_validate(snapshot_settings)
     assert restored.minimum_final_volume_enabled is True
     assert restored.minimum_final_volume == 15
     assert restored.source_available_volume == 50
+    legacy = ProtocolDilutionSettings.model_validate({"minimum_final_volume_enabled": True})
+    assert legacy.optimize_water_volumes is False
 
 
 def test_pcr_reagent_formula_matches_excel_overage():

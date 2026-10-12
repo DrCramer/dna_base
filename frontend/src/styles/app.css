@@ -134,6 +134,25 @@
 .protocol-dilution-heading label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
 .protocol-dilution-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .protocol-dilution-options { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px 18px; }
+.protocol-water-optimization { padding: 0 14px 12px; }
+.protocol-water-summary { display: flex; flex-wrap: wrap; gap: 6px 20px; padding: 8px 0; font-size: 12px; border-bottom: 1px solid var(--border); }
+.protocol-water-review, .protocol-lab-notice { color: var(--muted); }
+.protocol-lab-notice { margin: 8px 12px; font-size: 12px; }
+.protocol-rounding-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 10px 12px; }
+.protocol-rounding-fields label { display: grid; gap: 4px; font-size: 12px; }
+.protocol-rounding-fields input, .protocol-rounding-fields select { min-width: 0; width: 100%; }
+.protocol-water-stage-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 8px 12px; }
+.protocol-water-stage-groups h4 { margin: 0 0 8px; font-size: 13px; }
+.protocol-water-stage-groups table, .protocol-dilution-audit table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.protocol-water-stage-groups th, .protocol-water-stage-groups td, .protocol-dilution-audit th, .protocol-dilution-audit td { padding: 5px 6px; border: 1px solid var(--border); text-align: left; }
+.protocol-dilution-audit { overflow: auto; padding: 8px 12px; }
+.protocol-water-optimized { font-weight: 700; color: var(--accent); }
+.protocol-dilution-review-label { margin-left: 4px; font-size: 10px; }
+.protocol-print-page .protocol-dilution-audit { overflow: visible; padding: 0; }
+.protocol-print-page .protocol-dilution-audit table { font-size: 9px; }
+.protocol-print-page .protocol-dilution-audit td, .protocol-print-page .protocol-dilution-audit th { padding: 3px; }
+.protocol-print-page .protocol-water-optimized { color: #000; }
+.protocol-print-page .protocol-dilution-audit td, .protocol-print-page .protocol-dilution-audit th { border-color: #000; overflow-wrap: anywhere; }
 .protocol-dilution-summary label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .protocol-dilution-warning { display: inline-block; margin-left: 5px; color: var(--warning); vertical-align: -2px; }
 .protocol-dilution-section thead th { text-align: center; vertical-align: middle; white-space: nowrap; }

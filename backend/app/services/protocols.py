@@ -1,3 +1,4 @@
+import asyncio
 from collections import defaultdict
 from datetime import date
 from typing import Any
@@ -32,6 +33,7 @@ from app.services.protocol_plate import (
     plate_capacity,
 )
 from app.services.realtime_details import get_latest_realtime_details
+from app.services.protocol_dilution_optimizer import optimize_dilution_water_batches
 
 
 STAGE_ORDER = ("dna_extraction", "realtime", "pcr", "electrophoresis")
@@ -266,6 +268,7 @@ async def build_protocol_snapshot(
     }
     dilution_settings = payload.dilution.model_dump()
     dilutions = []
+    dilution_optimization = None
     if payload.dilution.enabled:
         dilutions = build_protocol_dilutions(
             objects,
@@ -278,12 +281,16 @@ async def build_protocol_snapshot(
             minimum_final_volume=payload.dilution.minimum_final_volume,
             source_available_volume=payload.dilution.source_available_volume,
         )
+        if payload.dilution.optimize_water_volumes:
+            dilutions, dilution_optimization = await asyncio.to_thread(optimize_dilution_water_batches, dilutions, payload.dilution)
     missing_concentration = sum(1 for item in dilutions if not item["available"])
     warnings = list(layouts["warnings"])
     if missing_concentration:
         warnings.append(
             f"У {missing_concentration} объектов нет концентрации RT. Расчёт разведений для них недоступен."
         )
+    if dilution_optimization and dilution_optimization["blocked_object_count"]:
+        warnings.append(f"У {dilution_optimization['blocked_object_count']} объектов разведение требует проверки: не найден вариант, соответствующий допуску и ограничениям объёмов.")
     snapshot = {
         "schema_version": 1,
         "protocol": {
@@ -300,6 +307,7 @@ async def build_protocol_snapshot(
         "dilution_settings": dilution_settings,
         "selection": payload.selection.model_dump() if payload.selection else None,
         "dilutions": dilutions,
+        "dilution_optimization": dilution_optimization,
         "warnings": warnings,
     }
     return {
@@ -311,6 +319,7 @@ async def build_protocol_snapshot(
         "layouts": layouts,
         "calculations": calculations,
         "dilutions": dilutions,
+        "dilution_optimization": dilution_optimization,
         "warnings": warnings,
         "snapshot": snapshot,
     }

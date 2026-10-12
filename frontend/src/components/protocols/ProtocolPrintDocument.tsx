@@ -1,11 +1,13 @@
-import type { Employee, ProtocolPlateRules, ProtocolPreview, ProtocolStageSettings, ProtocolStageType } from '../../api/types'
+import type { Employee, ProtocolDilutionSettings, ProtocolPlateRules, ProtocolPreview, ProtocolStageSettings, ProtocolStageType } from '../../api/types'
 import { ProtocolPlate } from './ProtocolPlate'
 import { protocolObjectIds } from './protocolSelection'
+import { protocolDilutionTolerance } from './ProtocolDilutionOptions'
 import {
   dilutionPageSize,
   dilutionSupplementPageCount,
   ProtocolCalculationTables,
   ProtocolDilutionsTable,
+  ProtocolDilutionAuditTable,
   protocolReagentRows,
   visibleDilutions,
   type DilutionSortKey,
@@ -57,6 +59,9 @@ export function ProtocolPrintDocument({ protocolDate, protocolNo, name, stages, 
   })
   const dilutions = visibleDilutions(preview.dilutions, dilutionView)
   const dilutionPages = Array.from({ length: Math.ceil(dilutions.length / dilutionPageSize) }, (_, index) => dilutions.slice(index * dilutionPageSize, (index + 1) * dilutionPageSize))
+  const optimizedRows = dilutions.filter((row) => row.optimization?.enabled)
+  const auditPages = Array.from({ length: Math.ceil(optimizedRows.length / dilutionPageSize) }, (_, index) => optimizedRows.slice(index * dilutionPageSize, (index + 1) * dilutionPageSize))
+  const savedDilutionSettings = preview.snapshot.dilution_settings as ProtocolDilutionSettings | undefined
   const hasCalculations = protocolReagentRows(preview, 'pcr').length > 0 || protocolReagentRows(preview, 'electrophoresis').length > 0
   return (
     <div className="protocol-print-pages">
@@ -106,12 +111,21 @@ export function ProtocolPrintDocument({ protocolDate, protocolNo, name, stages, 
           <article className="protocol-print-page protocol-print-data-page">
             <h1>Разведения · {name || 'Протокол'}</h1>
             <div className="protocol-print-meta"><div><span>Дата</span><strong>{displayDate(protocolDate)}</strong></div><div><span>№</span><strong>{protocolNo}</strong></div><div className="protocol-print-name"><span>Название</span><strong>{name || '—'}</strong></div><div><span>Строк</span><strong>{rows.length}</strong></div></div>
+            {preview.dilution_optimization?.enabled ? <p className="protocol-print-optimization-note">Удобные объёмы воды · допуск: {protocolDilutionTolerance(savedDilutionSettings)} · подробности в приложении «Округление». Отмеченные строки требуют решения сотрудника.</p> : null}
             <ProtocolDilutionsTable rows={rows} view={{ ...dilutionView, hideNoDilution: false }} onSort={onDilutionSort} print />
           </article>
         </div>
       })}
+      {auditPages.map((rows, index) => <div className="protocol-print-page-shell" key={`optimization-${index}`}>
+        <div className="protocol-print-page-label">Страница {pages.length + dilutionPages.length + index + 1} · Округление · лист {index + 1}</div>
+        <article className="protocol-print-page protocol-print-data-page">
+          <h1>Округление разведений · {name || 'Протокол'}</h1>
+          <p>Допуск: {protocolDilutionTolerance(savedDilutionSettings)} · предпочтительный шаг: {savedDilutionSettings?.preferred_water_step_ul ?? '—'} мкл. Допуск и параметры дозирования требуют утверждения лабораторией.</p>
+          <ProtocolDilutionAuditTable rows={rows} />
+        </article>
+      </div>)}
       {hasCalculations ? <div className="protocol-print-page-shell" key="calculations">
-        <div className="protocol-print-page-label">Страница {pages.length + dilutionPages.length + 1} · Расчёты</div>
+        <div className="protocol-print-page-label">Страница {pages.length + dilutionPages.length + auditPages.length + 1} · Расчёты</div>
         <article className="protocol-print-page protocol-print-data-page">
           <h1>Расчёты · {name || 'Протокол'}</h1>
           <div className="protocol-print-meta"><div><span>Дата</span><strong>{displayDate(protocolDate)}</strong></div><div><span>№</span><strong>{protocolNo}</strong></div><div className="protocol-print-name"><span>Название</span><strong>{name || '—'}</strong></div><div><span>Объектов</span><strong>{objectCount}</strong></div></div>
@@ -125,6 +139,7 @@ export function ProtocolPrintDocument({ protocolDate, protocolNo, name, stages, 
 export function protocolPrintPageCount(preview: ProtocolPreview, selectedStageTypes: ProtocolStageType[], dilutionView: DilutionView) {
   const plates = selectedStageTypes.reduce((total, stageType) => total + (stageType === 'pcr' || stageType === 'electrophoresis' ? preview.layouts.pcr.plates.length : preview.layouts.source.plates.length), 0)
   const dilutionPages = dilutionSupplementPageCount(preview.dilutions, dilutionView)
+  const auditPages = Math.ceil(visibleDilutions(preview.dilutions, dilutionView).filter((row) => row.optimization?.enabled).length / dilutionPageSize)
   const calculations = protocolReagentRows(preview, 'pcr').length || protocolReagentRows(preview, 'electrophoresis').length ? 1 : 0
-  return plates + dilutionPages + calculations
+  return plates + dilutionPages + auditPages + calculations
 }

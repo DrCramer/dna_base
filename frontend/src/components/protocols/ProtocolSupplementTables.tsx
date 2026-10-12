@@ -1,5 +1,5 @@
 import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react'
-import type { ProtocolPreview } from '../../api/types'
+import type { ProtocolDilutionOptimization, ProtocolPreview } from '../../api/types'
 
 export type DilutionSortKey = 'first' | 'second' | null
 export type DilutionSortDirection = 'asc' | 'desc'
@@ -22,6 +22,8 @@ export interface DilutionRow {
   minimum_volume_available?: boolean
   minimum_volume_warning?: string | null
   steps?: Array<{ dna_volume?: number | null; water_volume?: number | null }>
+  baseline_steps?: Array<{ dna_volume?: number | null; water_volume?: number | null }>
+  optimization?: ProtocolDilutionOptimization | null
 }
 
 export const dilutionPageSize = 24
@@ -65,10 +67,22 @@ export function formatProtocolValue(value: unknown) {
   return value === null || value === undefined || value === '' ? '—' : String(value)
 }
 
-function formatDilutionVolume(value: unknown) {
+export function formatDilutionVolume(value: unknown) {
   return typeof value === 'number'
     ? new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 }).format(value)
     : formatProtocolValue(value)
+}
+
+export function dilutionWaterTooltip(row: DilutionRow, index: number) {
+  const optimization = row.optimization
+  if (!optimization?.enabled || row.steps?.[index]?.water_volume === undefined) return undefined
+  return [
+    `До округления: ${formatDilutionVolume(row.baseline_steps?.[index]?.water_volume)} мкл`,
+    `Для работы: ${formatDilutionVolume(row.steps?.[index]?.water_volume)} мкл`,
+    `Расчётная концентрация: ${new Intl.NumberFormat('ru-RU', { maximumSignificantDigits: 6 }).format(optimization.actual_final_concentration)} нг/мкл`,
+    `Отклонение от цели: ${formatDilutionVolume(optimization.relative_error_percent)}%`,
+    optimization.reason,
+  ].filter(Boolean).join('\n')
 }
 
 type Reagent = { key: string; label: string; per_reaction: unknown; total: unknown }
@@ -124,14 +138,26 @@ export function ProtocolDilutionsTable({ rows, view, onHideNoDilution, onSort, p
           <tr><th>ДНК</th><th>H₂O</th><th>ДНК</th><th>H₂O</th></tr>
         </thead>
         <tbody>{shown.map((item) => <tr key={item.object_id}>
-          <td className="protocol-dilution-col-plate">{formatProtocolValue(item.plate_index)}</td><td className="protocol-dilution-col-well">{formatProtocolValue(item.well)}</td><td>{formatProtocolValue(item.display_name)}{item.minimum_volume_available === false && item.minimum_volume_warning ? <span className="protocol-dilution-warning" role="img" aria-label={item.minimum_volume_warning} title={item.minimum_volume_warning}><AlertTriangle size={14} aria-hidden="true" /></span> : null}</td>
+          <td className="protocol-dilution-col-plate">{formatProtocolValue(item.plate_index)}</td><td className="protocol-dilution-col-well">{formatProtocolValue(item.well)}</td><td>{formatProtocolValue(item.display_name)}{item.minimum_volume_available === false && item.minimum_volume_warning ? <span className="protocol-dilution-warning" role="img" aria-label={item.minimum_volume_warning} title={item.minimum_volume_warning}><AlertTriangle size={14} aria-hidden="true" /></span> : null}{item.optimization?.needs_review ? <span className="protocol-dilution-warning" title={item.optimization.reason || 'Требует проверки'}><AlertTriangle size={14} aria-hidden="true" /><span className="protocol-dilution-review-label">Требует проверки</span></span> : null}</td>
           <td>{formatProtocolValue(item.source_concentration)}</td><td>{formatProtocolValue(item.target_concentration)}</td><td>{formatProtocolValue(item.total_factor)}</td>
-          <td>{formatDilutionVolume(item.steps?.[0]?.dna_volume)}</td><td>{formatProtocolValue(item.steps?.[0]?.water_volume)}</td>
-          <td>{formatDilutionVolume(item.steps?.[1]?.dna_volume)}</td><td>{formatProtocolValue(item.steps?.[1]?.water_volume)}</td>
+          <td>{formatDilutionVolume(item.steps?.[0]?.dna_volume)}</td><td title={dilutionWaterTooltip(item, 0)} className={item.optimization?.status === 'optimized' ? 'protocol-water-optimized' : undefined}>{formatDilutionVolume(item.steps?.[0]?.water_volume)}</td>
+          <td>{formatDilutionVolume(item.steps?.[1]?.dna_volume)}</td><td title={dilutionWaterTooltip(item, 1)} className={item.optimization?.status === 'optimized' ? 'protocol-water-optimized' : undefined}>{formatDilutionVolume(item.steps?.[1]?.water_volume)}</td>
         </tr>)}</tbody>
       </table></div> : <div className="protocol-supplement-empty">Нет строк для отображения.</div>}
     </section>
   )
+}
+
+export function ProtocolDilutionAuditTable({ rows }: { rows: Array<Record<string, unknown> | DilutionRow> }) {
+  const shown = visibleDilutions(rows, { hideNoDilution: false, sortKey: null, directions: { first: 'asc', second: 'asc' } }).filter((row) => row.optimization?.enabled)
+  const reasons: Record<string, string> = { source_volume_limit: 'Лимит исходной ДНК', dna_not_measurable: 'Диапазон или шаг ДНК', water_not_measurable: 'Диапазон или шаг H₂O', minimum_volume_limit: 'Минимальный объём смеси', insufficient_first_dilution: 'Не хватает продукта I этапа', baseline_out_of_tolerance: 'Концентрация вне допуска' }
+  return <div className="protocol-dilution-audit"><table><thead><tr><th>Плашка</th><th>Лунка</th><th>Объект</th><th>H₂O I до / после</th><th>H₂O II до / после</th><th>Факт., нг/мкл</th><th>Ошибка, %</th><th>Статус</th></tr></thead><tbody>{shown.map((row) => <tr key={`${row.object_id}-${row.plate_index}-${row.well}`}>
+    <td>{formatProtocolValue(row.plate_index)}</td><td>{formatProtocolValue(row.well)}</td><td>{formatProtocolValue(row.display_name)}</td>
+    <td>{formatDilutionVolume(row.baseline_steps?.[0]?.water_volume)} / {formatDilutionVolume(row.steps?.[0]?.water_volume)}</td>
+    <td>{formatDilutionVolume(row.baseline_steps?.[1]?.water_volume)} / {formatDilutionVolume(row.steps?.[1]?.water_volume)}</td>
+    <td>{new Intl.NumberFormat('ru-RU', { maximumSignificantDigits: 6 }).format(row.optimization!.actual_final_concentration)}</td><td>{formatDilutionVolume(row.optimization?.relative_error_percent)}</td>
+    <td title={row.optimization?.reason || undefined}>{row.optimization?.status === 'blocked' ? `Требует проверки: ${reasons[row.optimization.reason_code || ''] || 'нет допустимого варианта'}` : row.optimization?.status === 'optimized' ? 'Оптимизировано' : 'Исходный расчёт'}</td>
+  </tr>)}</tbody></table></div>
 }
 
 export function ProtocolCalculationTables({ preview }: { preview: ProtocolPreview }) {

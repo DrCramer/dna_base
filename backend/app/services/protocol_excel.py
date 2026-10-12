@@ -75,15 +75,52 @@ def build_protocol_workbook(snapshot: dict[str, Any]) -> bytes:
         cell.fill = PatternFill("solid", fgColor="D9EAF7")
 
     dilution = workbook.create_sheet("Dilution")
-    dilution.append(["Плашка", "Лунка", "Объект", "Исх. конц.", "Кон. конц.", "Фактор", "Фактор I", "ДНК I", "H₂O I", "Фактор II", "ДНК II", "H₂O II"])
+    optimization = snapshot.get("dilution_optimization") or {}
+    dilution_headers = ["Плашка", "Лунка", "Объект", "Исх. конц.", "Кон. конц.", "Фактор", "Фактор I", "ДНК I", "H₂O I", "Фактор II", "ДНК II", "H₂O II"]
+    if optimization.get("enabled"):
+        dilution_headers += ["Фактическая конц.", "Отклонение, %", "Базовая ДНК I", "Базовая H₂O I", "Базовая ДНК II", "Базовая H₂O II", "Базовая факт. конц.", "Статус округления", "Причина / примечание", "Остаток I разведения"]
+    dilution.append(dilution_headers)
     for item in snapshot.get("dilutions", []):
         steps = item.get("steps", [])
         first = steps[0] if steps else {}
         second = steps[1] if len(steps) > 1 else {}
-        dilution.append([item.get("plate_index"), item.get("well"), item.get("display_name"), item.get("source_concentration"), item.get("target_concentration"), item.get("total_factor"), first.get("factor"), first.get("dna_volume"), first.get("water_volume"), second.get("factor"), second.get("dna_volume"), second.get("water_volume")])
+        values = [item.get("plate_index"), item.get("well"), item.get("display_name"), item.get("source_concentration"), item.get("target_concentration"), item.get("total_factor"), first.get("factor"), first.get("dna_volume"), first.get("water_volume"), second.get("factor"), second.get("dna_volume"), second.get("water_volume")]
+        if optimization.get("enabled"):
+            metadata = item.get("optimization") or {}
+            baseline = item.get("baseline_steps") or []
+            base_one = baseline[0] if baseline else {}
+            base_two = baseline[1] if len(baseline) > 1 else {}
+            status = {"optimized": "Оптимизировано", "unchanged": "Исходный расчёт", "blocked": "Требует проверки"}.get(metadata.get("status"))
+            values += [metadata.get("actual_final_concentration"), metadata.get("relative_error_percent"), base_one.get("dna_volume"), base_one.get("water_volume"), base_two.get("dna_volume"), base_two.get("water_volume"), metadata.get("baseline_actual_final_concentration"), status, metadata.get("reason"), metadata.get("first_dilution_remaining_volume")]
+        dilution.append(values)
     for cell in dilution[1]:
         cell.font = Font(bold=True)
         cell.fill = PatternFill("solid", fgColor="D9EAF7")
+    if optimization.get("enabled"):
+        settings = snapshot.get("dilution_settings") or {}
+        summary = workbook.create_sheet("Округление")
+        summary.append(["Допуск и параметры дозирования требуют утверждения лабораторией"])
+        summary.append(["Допуск, %", settings.get("allowed_concentration_error_percent")])
+        summary.append(["Максимум ниже цели, %", settings.get("max_under_target_pct") if settings.get("max_under_target_pct") is not None else settings.get("allowed_concentration_error_percent")])
+        summary.append(["Максимум выше цели, %", settings.get("max_over_target_pct") if settings.get("max_over_target_pct") is not None else settings.get("allowed_concentration_error_percent")])
+        summary.append(["Предпочтительный шаг воды, мкл", settings.get("preferred_water_step_ul")])
+        summary.append(["Приоритет", settings.get("optimization_priority")])
+        summary.append(["Минимальный объём включён", settings.get("minimum_final_volume_enabled")])
+        summary.append(["Минимальная смесь, мкл", settings.get("minimum_final_volume")])
+        summary.append(["Доступная исходная ДНК, мкл", settings.get("source_available_volume")])
+        for key, value in (settings.get("pipetting") or {}).items():
+            summary.append([key, value])
+        for key, label in (("unique_water_volumes_before", "Вариантов H₂O до"), ("unique_water_volumes_after", "Вариантов H₂O после"), ("optimized_object_count", "Оптимизировано объектов"), ("unchanged_object_count", "Сохранён базовый расчёт"), ("blocked_object_count", "Требуют проверки"), ("excluded_object_count", "Без расчёта / разведение не нужно"), ("max_absolute_error_percent", "Максимальное отклонение, %")):
+            summary.append([label, optimization.get(key)])
+        groups = workbook.create_sheet("Группы H₂O")
+        groups.append(["Этап", "H₂O, мкл", "Плашка", "Лунка", "Объект", "Требует проверки"])
+        for key, stage in (("batch_groups_first", "I"), ("batch_groups_second", "II")):
+            for batch in optimization.get(key) or []:
+                for item in batch["objects"]:
+                    groups.append([stage, batch["water_volume"], item.get("plate_index"), item.get("well"), item.get("display_name"), bool(item.get("needs_review"))])
+        for cell in groups[1]:
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill("solid", fgColor="D9EAF7")
     for ws in workbook.worksheets:
         ws.freeze_panes = "A2"
     output = BytesIO()
