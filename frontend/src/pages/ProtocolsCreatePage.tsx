@@ -77,6 +77,7 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
   const [printSelectionOpen, setPrintSelectionOpen] = useState(false)
   const [printIntent, setPrintIntent] = useState<'preview' | 'print'>('preview')
   const [printStageTypes, setPrintStageTypes] = useState<ProtocolStageType[]>(stageTypes)
+  const [printDilutions, setPrintDilutions] = useState(true)
   const [dilutionView, setDilutionView] = useState<DilutionView>({ hideNoDilution: false, sortKey: null, directions: { first: 'asc', second: 'asc' } })
   const [autoPrint, setAutoPrint] = useState(false)
   const hydratedId = useRef<number | null>(null)
@@ -289,7 +290,7 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
     setPrintSelectionOpen(true)
   }
   function confirmPrintSelection() {
-    if (!preview || !protocolPrintPageCount(preview, printStageTypes, dilutionView)) return
+    if (!preview || !protocolPrintPageCount(preview, printStageTypes, dilutionView, printDilutions)) return
     setPrintSelectionOpen(false)
     setShowPrintPreview(true)
     setAutoPrint(printIntent === 'print')
@@ -333,10 +334,12 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
         <h2>Что печатать</h2>
         <div className="protocol-print-stage-options">{([
           ['dna_extraction', 'Выделение'], ['realtime', 'RT'], ['pcr', 'PCR'], ['electrophoresis', 'Форез']
-        ] as Array<[ProtocolStageType, string]>).map(([stageType, label]) => <label key={stageType}><input type="checkbox" checked={printStageTypes.includes(stageType)} onChange={() => togglePrintStage(stageType)} />{label}</label>)}</div>
-        <div className="modal-actions"><button type="button" className="icon-button" onClick={() => setPrintSelectionOpen(false)}>Отмена</button><button type="button" className="primary compact" disabled={!preview || !protocolPrintPageCount(preview, printStageTypes, dilutionView)} onClick={confirmPrintSelection}>{printIntent === 'print' ? <Printer size={17} /> : <Eye size={17} />}{printIntent === 'print' ? 'Печать' : 'Предпросмотр'}</button></div>
+        ] as Array<[ProtocolStageType, string]>).map(([stageType, label]) => <label key={stageType}><input type="checkbox" checked={printStageTypes.includes(stageType)} onChange={() => togglePrintStage(stageType)} />{label}</label>)}
+          <label><input type="checkbox" checked={printDilutions} onChange={(event) => setPrintDilutions(event.target.checked)} />Разведения</label>
+        </div>
+        <div className="modal-actions"><button type="button" className="icon-button" onClick={() => setPrintSelectionOpen(false)}>Отмена</button><button type="button" className="primary compact" disabled={!preview || !protocolPrintPageCount(preview, printStageTypes, dilutionView, printDilutions)} onClick={confirmPrintSelection}>{printIntent === 'print' ? <Printer size={17} /> : <Eye size={17} />}{printIntent === 'print' ? 'Печать' : 'Предпросмотр'}</button></div>
       </div></div> : null}
-      {showPrintPreview && preview ? createPortal(<div className="modal-backdrop protocol-preview-backdrop" onMouseDown={() => setShowPrintPreview(false)}><div className="protocol-preview-modal" role="dialog" aria-modal="true" aria-label="Предпросмотр печати" onMouseDown={(event) => event.stopPropagation()}><div className="protocol-preview-toolbar"><strong>Предпросмотр A4 landscape · страниц: {protocolPrintPageCount(preview, printStageTypes, dilutionView)}</strong><button type="button" className="primary compact" onClick={printProtocol}><Printer size={17} />Печать</button><button type="button" className="icon-button" onClick={() => setShowPrintPreview(false)}>Закрыть</button></div><div className="protocol-print-root"><ProtocolPrintDocument protocolDate={protocolDate} protocolNo={protocolNo} name={name} stages={stages} selectedStageTypes={printStageTypes} plateRules={plateRules} preview={preview} employees={employees.data || []} dilutionView={dilutionView} onDilutionSort={sortDilutions} /></div></div></div>, document.body) : null}
+      {showPrintPreview && preview ? createPortal(<div className="modal-backdrop protocol-preview-backdrop" onMouseDown={() => setShowPrintPreview(false)}><div className="protocol-preview-modal" role="dialog" aria-modal="true" aria-label="Предпросмотр печати" onMouseDown={(event) => event.stopPropagation()}><div className="protocol-preview-toolbar"><strong>Предпросмотр A4 landscape · страниц: {protocolPrintPageCount(preview, printStageTypes, dilutionView, printDilutions)}</strong><button type="button" className="primary compact" onClick={printProtocol}><Printer size={17} />Печать</button><button type="button" className="icon-button" onClick={() => setShowPrintPreview(false)}>Закрыть</button></div><div className="protocol-print-root"><ProtocolPrintDocument protocolDate={protocolDate} protocolNo={protocolNo} name={name} stages={stages} selectedStageTypes={printStageTypes} includeDilutions={printDilutions} plateRules={plateRules} preview={preview} employees={employees.data || []} dilutionView={dilutionView} onDilutionSort={sortDilutions} /></div></div></div>, document.body) : null}
     </div>
   )
 }

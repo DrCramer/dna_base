@@ -196,8 +196,8 @@
 .protocol-print-data-page .protocol-dilution-wrap td { padding: 2px 3px; text-align: center; overflow-wrap: anywhere; }
 .protocol-print-data-page .protocol-dilution-wrap .protocol-dilution-col-plate,
 .protocol-print-data-page .protocol-dilution-wrap .protocol-dilution-col-well { width: 1%; white-space: nowrap; }
-.protocol-print-data-page .protocol-dilution-wrap tbody tr:nth-child(even) td { background: #f7f7f7; }
-.protocol-print-data-page .protocol-dilution-wrap tbody tr:hover td { background: transparent; }
+.protocol-print-data-page .protocol-dilution-wrap tbody tr:nth-child(odd) td { background: #fff; }
+.protocol-print-data-page .protocol-dilution-wrap tbody tr:nth-child(even) td { background: #e6e6e6; }
 .protocol-print-data-page .protocol-calculation-columns { gap: 9px; padding: 0; }
 .protocol-print-data-page .protocol-calculation-columns table { font-size: 10px; }
 .protocol-print-data-page .protocol-calculation-columns th,
@@ -270,6 +270,9 @@
   body.protocol-printing .protocol-print-page .protocol-well-nc { background: #eee !important; }
   body.protocol-printing .protocol-print-page .protocol-well-ladder { background: #ddd !important; }
   body.protocol-printing .protocol-print-page .protocol-well-pc { background: #ccc !important; }
+  body.protocol-printing .protocol-dilution-wrap td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body.protocol-printing .protocol-dilution-wrap tbody tr:nth-child(odd) td { background: #fff !important; }
+  body.protocol-printing .protocol-dilution-wrap tbody tr:nth-child(even) td { background: #e6e6e6 !important; }
 }
 
 :root[data-theme='dark'] {

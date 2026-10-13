@@ -1,5 +1,5 @@
 import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react'
-import type { ProtocolDilutionOptimization, ProtocolPreview } from '../../api/types'
+import type { ProtocolDilutionOptimization, ProtocolPreview, ProtocolStageType } from '../../api/types'
 
 export type DilutionSortKey = 'first' | 'second' | null
 export type DilutionSortDirection = 'asc' | 'desc'
@@ -160,11 +160,11 @@ export function ProtocolDilutionAuditTable({ rows }: { rows: Array<Record<string
   </tr>)}</tbody></table></div>
 }
 
-export function ProtocolCalculationTables({ preview }: { preview: ProtocolPreview }) {
+export function ProtocolCalculationTables({ preview, selectedStageTypes = ['pcr', 'electrophoresis'] }: { preview: ProtocolPreview; selectedStageTypes?: ProtocolStageType[] }) {
   const pcr = protocolReagentRows(preview, 'pcr')
   const forez = protocolReagentRows(preview, 'electrophoresis')
   return <div className="protocol-calculation-columns">
-    <table><thead><tr><th colSpan={3}>Протокол PCR</th></tr><tr><th>Компонент</th><th>На реакцию</th><th>Всего</th></tr></thead><tbody>{pcr.map((item) => <tr key={item.key}><td>{item.label}</td><td>{formatProtocolValue(item.per_reaction)}</td><td>{formatProtocolValue(item.total)}</td></tr>)}</tbody></table>
-    <table><thead><tr><th colSpan={3}>Протокол ЭФ</th></tr><tr><th>Компонент</th><th>На реакцию</th><th>Всего</th></tr></thead><tbody>{forez.map((item) => <tr key={item.key}><td>{item.label}</td><td>{formatProtocolValue(item.per_reaction)}</td><td>{formatProtocolValue(item.total)}</td></tr>)}</tbody></table>
+    {selectedStageTypes.includes('pcr') ? <table><thead><tr><th colSpan={3}>Протокол PCR</th></tr><tr><th>Компонент</th><th>На реакцию</th><th>Всего</th></tr></thead><tbody>{pcr.map((item) => <tr key={item.key}><td>{item.label}</td><td>{formatProtocolValue(item.per_reaction)}</td><td>{formatProtocolValue(item.total)}</td></tr>)}</tbody></table> : null}
+    {selectedStageTypes.includes('electrophoresis') ? <table><thead><tr><th colSpan={3}>Протокол ЭФ</th></tr><tr><th>Компонент</th><th>На реакцию</th><th>Всего</th></tr></thead><tbody>{forez.map((item) => <tr key={item.key}><td>{item.label}</td><td>{formatProtocolValue(item.per_reaction)}</td><td>{formatProtocolValue(item.total)}</td></tr>)}</tbody></table> : null}
   </div>
 }

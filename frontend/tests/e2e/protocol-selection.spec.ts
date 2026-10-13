@@ -2,6 +2,22 @@ import { expect, test, type Page } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 import type { Protocol, ProtocolObject, ProtocolPayload, ProtocolPreview } from '../../src/api/types'
 import { protocolNumbers, protocolObjectIds, selectionCaption } from '../../src/components/protocols/protocolSelection'
+import { protocolPrintPageCount } from '../../src/components/protocols/ProtocolPrintDocument'
+
+test('число печатных страниц учитывает только выбранные разделы без аудита округления', () => {
+  const preview = {
+    layouts: { source: { plates: [{}, {}] }, pcr: { plates: [{}, {}, {}] } },
+    dilutions: Array.from({ length: 25 }, (_, index) => ({ object_id: index + 1, steps: [{ dna_volume: 3, water_volume: 65 }], optimization: { enabled: true } })),
+    calculations: { pcr: [], pcr_total: { components: [{ key: 'mix', label: 'Mix', per_reaction: 10, total: 250 }] }, electrophoresis: { components: [] } },
+  } as unknown as ProtocolPreview
+  const view = { hideNoDilution: false, sortKey: null, directions: { first: 'asc' as const, second: 'asc' as const } }
+  expect(protocolPrintPageCount(preview, [], view, true)).toBe(2)
+  expect(protocolPrintPageCount(preview, [], view, false)).toBe(0)
+  expect(protocolPrintPageCount(preview, ['dna_extraction'], view, false)).toBe(2)
+  expect(protocolPrintPageCount(preview, ['pcr'], view, false)).toBe(4)
+  expect(protocolPrintPageCount(preview, ['pcr'], view, true)).toBe(6)
+  expect(protocolPrintPageCount({ ...preview, dilutions: [] }, [], view, true)).toBe(0)
+})
 
 test('уникальные ID и TXT используют порядок snapshot, включая старые object_id', () => {
   const objects = [{ id: 2, rcsme_reg_no: 'ии2' }, { object_id: 10, rcsme_reg_no: 'ии10' }, { id: 2, rcsme_reg_no: 'ии2' }, { id: 100, rcsme_reg_no: 'ии100' }]
@@ -251,7 +267,8 @@ test('удобные объёмы воды сохраняют лунки, нас
       })
     }
     const summary = enabled ? { enabled: true, object_count: rows.length, active_object_count: Math.min(7, rows.length), unique_water_volumes_before: new Set(rows.flatMap((row) => (row.baseline_steps || []).map((step) => step.water_volume))).size, unique_water_volumes_after: new Set(rows.flatMap((row) => row.steps.map((step) => step.water_volume))).size, optimized_object_count: rows.filter((row) => row.optimization?.status === 'optimized').length, unchanged_object_count: rows.filter((row) => row.optimization?.status === 'unchanged').length, blocked_object_count: 0, excluded_object_count: Math.max(0, rows.length - 7), max_absolute_error_percent: Math.max(0, ...rows.map((row) => Math.abs(row.optimization?.relative_error_percent || 0))), batch_groups_first: groups(0), batch_groups_second: groups(1) } : null
-    return { ...preview, dilutions: rows, dilution_optimization: summary, snapshot: { ...preview.snapshot, dilutions: rows, dilution_optimization: summary } }
+    const calculations = { pcr: [{ components: [{ key: 'mix', label: 'Mix', per_reaction: 10, total: 70 }] }], electrophoresis: { components: [{ key: 'ils', label: 'ILS', per_reaction: 1, total: 7 }] } }
+    return { ...preview, calculations, dilutions: rows, dilution_optimization: summary, snapshot: { ...preview.snapshot, calculations, dilutions: rows, dilution_optimization: summary } }
   })
   await page.getByRole('button', { name: 'Партии протокола' }).click()
   await page.locator('.multi-party-modal input[type=checkbox]').check()
@@ -309,10 +326,43 @@ test('удобные объёмы воды сохраняют лунки, нас
   const printRows = page.locator('.protocol-print-root .protocol-dilution-wrap tbody tr')
   const printed = await printRows.evaluateAll((rows) => rows.map((row) => [row.children[2].textContent, row.children[6].textContent, row.children[7].textContent, row.children[8].textContent, row.children[9].textContent]))
   expect(printed).toEqual(working)
-  await expect(page.locator('.protocol-print-root .protocol-dilution-audit tbody tr')).toHaveCount(7)
+  await expect(page.locator('.protocol-print-root .protocol-dilution-audit')).toHaveCount(0)
+  await expect(page.locator('.protocol-print-root')).not.toContainText('Округление')
+  await expect(page.locator('.protocol-print-page')).toHaveCount(6)
   await expect(page.locator('.protocol-print-root .protocol-dilution-options')).toHaveCount(0)
   await page.screenshot({ path: testInfo.outputPath('water-print.png'), fullPage: true })
-  await page.locator('.protocol-print-data-page').filter({ has: page.getByRole('heading', { name: /Округление разведений/ }) }).screenshot({ path: testInfo.outputPath('water-audit.png') })
   await page.locator('.protocol-print-data-page').filter({ has: page.getByRole('heading', { name: /^Разведения ·/ }) }).screenshot({ path: testInfo.outputPath('water-dilutions.png') })
   expect(await page.locator('.protocol-print-page').evaluateAll((pages) => pages.every((page) => page.scrollWidth <= page.clientWidth + 1))).toBe(true)
+  await page.getByRole('button', { name: 'Закрыть', exact: true }).click()
+  await page.getByRole('button', { name: 'Предпросмотр печати', exact: true }).click()
+  const selection = page.getByRole('dialog', { name: 'Что печатать', exact: true })
+  for (const stage of ['Выделение', 'RT', 'PCR', 'Форез']) await selection.getByLabel(stage, { exact: true }).uncheck()
+  await expect(selection.getByLabel('Разведения', { exact: true })).toBeChecked()
+  await selection.getByRole('button', { name: 'Предпросмотр', exact: true }).click()
+  await expect(page.locator('.protocol-print-page')).toHaveCount(1)
+  await expect(page.locator('.protocol-preview-toolbar strong')).toContainText('страниц: 1')
+  await expect(page.locator('.protocol-print-root .protocol-calculation-columns')).toHaveCount(0)
+  expect(await printRows.evaluateAll((rows) => rows.map((row) => [row.children[2].textContent, row.children[6].textContent, row.children[7].textContent, row.children[8].textContent, row.children[9].textContent]))).toEqual(working)
+  await printRows.nth(1).locator('td').first().hover()
+  await page.emulateMedia({ media: 'print' })
+  await page.evaluate(() => document.body.classList.add('protocol-printing'))
+  await expect(printRows.first().locator('td').first()).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  await expect(printRows.nth(1).locator('td').first()).toHaveCSS('background-color', 'rgb(230, 230, 230)')
+  await expect(printRows.nth(1).locator('td').first()).toHaveCSS('print-color-adjust', 'exact')
+  await page.pdf({ path: testInfo.outputPath('dilutions-no-background.pdf'), preferCSSPageSize: true, printBackground: false })
+  await page.screenshot({ path: testInfo.outputPath('dilutions-print-media.png'), fullPage: true })
+  await page.evaluate(() => document.body.classList.remove('protocol-printing'))
+  await page.emulateMedia({ media: 'screen' })
+  await page.getByRole('button', { name: 'Закрыть', exact: true }).click()
+  await page.getByRole('button', { name: 'Предпросмотр печати', exact: true }).click()
+  await selection.getByLabel('Разведения', { exact: true }).uncheck()
+  await expect(selection.getByRole('button', { name: 'Предпросмотр', exact: true })).toBeDisabled()
+  await selection.getByLabel('PCR', { exact: true }).check()
+  await selection.getByRole('button', { name: 'Предпросмотр', exact: true }).click()
+  await expect(page.locator('.protocol-print-page')).toHaveCount(2)
+  await expect(page.locator('.protocol-preview-toolbar strong')).toContainText('страниц: 2')
+  await expect(printRows).toHaveCount(0)
+  await expect(page.locator('.protocol-print-root .protocol-dilution-audit')).toHaveCount(0)
+  await expect(page.locator('.protocol-print-root .protocol-calculation-columns')).toContainText('Протокол PCR')
+  await expect(page.locator('.protocol-print-root .protocol-calculation-columns')).not.toContainText('Протокол ЭФ')
 })
