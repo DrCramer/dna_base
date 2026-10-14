@@ -1,15 +1,13 @@
+import { useLayoutEffect, useMemo, useState } from 'react'
 import type { Employee, ProtocolDilutionSettings, ProtocolPlateRules, ProtocolPreview, ProtocolStageSettings, ProtocolStageType } from '../../api/types'
 import { ProtocolPlate } from './ProtocolPlate'
 import { protocolObjectIds } from './protocolSelection'
 import { protocolDilutionTolerance } from './ProtocolDilutionOptions'
+import { ProtocolDilutionPrintPages } from './ProtocolDilutionPrintPages'
 import {
-  dilutionPageSize,
-  dilutionSupplementPageCount,
   ProtocolCalculationTables,
-  ProtocolDilutionsTable,
   protocolReagentRows,
   visibleDilutions,
-  type DilutionSortKey,
   type DilutionView,
 } from './ProtocolSupplementTables'
 
@@ -31,7 +29,7 @@ interface Props {
   preview: ProtocolPreview
   employees: Employee[]
   dilutionView: DilutionView
-  onDilutionSort: (key: Exclude<DilutionSortKey, null>) => void
+  onPageCountChange: (count: number) => void
 }
 
 function displayDate(value: string | null | undefined) {
@@ -50,17 +48,20 @@ function snapshotPerformers(preview: ProtocolPreview, stageType: ProtocolStageTy
   })
 }
 
-export function ProtocolPrintDocument({ protocolDate, protocolNo, name, stages, selectedStageTypes, includeDilutions, plateRules, preview, employees, dilutionView, onDilutionSort }: Props) {
+export function ProtocolPrintDocument({ protocolDate, protocolNo, name, stages, selectedStageTypes, includeDilutions, plateRules, preview, employees, dilutionView, onPageCountChange }: Props) {
   const objectCount = protocolObjectIds(preview.objects).length
   const orderedStageTypes = (Object.keys(stageLabels) as ProtocolStageType[]).filter((stageType) => selectedStageTypes.includes(stageType))
   const pages = orderedStageTypes.flatMap((stageType) => {
     const layout = stageType === 'pcr' || stageType === 'electrophoresis' ? preview.layouts.pcr : preview.layouts.source
     return layout.plates.map((plate) => ({ stageType, layout, plate }))
   })
-  const dilutions = includeDilutions ? visibleDilutions(preview.dilutions, dilutionView) : []
-  const dilutionPages = Array.from({ length: Math.ceil(dilutions.length / dilutionPageSize) }, (_, index) => dilutions.slice(index * dilutionPageSize, (index + 1) * dilutionPageSize))
+  const dilutions = useMemo(() => includeDilutions ? visibleDilutions(preview.dilutions, dilutionView) : [], [includeDilutions, preview.dilutions, dilutionView])
+  const [dilutionPageCount, setDilutionPageCount] = useState(0)
   const savedDilutionSettings = preview.snapshot.dilution_settings as ProtocolDilutionSettings | undefined
   const hasCalculations = selectedStageTypes.some((stage) => (stage === 'pcr' || stage === 'electrophoresis') && protocolReagentRows(preview, stage).length > 0)
+  useLayoutEffect(() => {
+    onPageCountChange(pages.length + dilutionPageCount + Number(hasCalculations))
+  }, [pages.length, dilutionPageCount, hasCalculations, onPageCountChange])
   return (
     <div className="protocol-print-pages">
       {pages.map(({ stageType, plate }, pageIndex) => {
@@ -103,19 +104,9 @@ export function ProtocolPrintDocument({ protocolDate, protocolNo, name, stages, 
           </div>
         )
       })}
-      {dilutionPages.map((rows, index) => {
-        return <div className="protocol-print-page-shell" key={`dilutions-${index}`}>
-          <div className="protocol-print-page-label">Страница {pages.length + index + 1} · Разведения · лист {index + 1}</div>
-          <article className="protocol-print-page protocol-print-data-page">
-            <h1>Разведения · {name || 'Протокол'}</h1>
-            <div className="protocol-print-meta"><div><span>Дата</span><strong>{displayDate(protocolDate)}</strong></div><div><span>№</span><strong>{protocolNo}</strong></div><div className="protocol-print-name"><span>Название</span><strong>{name || '—'}</strong></div><div><span>Строк</span><strong>{rows.length}</strong></div></div>
-            {preview.dilution_optimization?.enabled ? <p className="protocol-print-optimization-note">Удобные объёмы воды · допуск: {protocolDilutionTolerance(savedDilutionSettings)}. Отмеченные строки требуют решения сотрудника.</p> : null}
-            <ProtocolDilutionsTable rows={rows} view={{ ...dilutionView, hideNoDilution: false }} onSort={onDilutionSort} print />
-          </article>
-        </div>
-      })}
+      <ProtocolDilutionPrintPages rows={dilutions} protocolDate={displayDate(protocolDate)} protocolNo={protocolNo} name={name} view={dilutionView} precedingPageCount={pages.length} onPageCountChange={setDilutionPageCount} note={preview.dilution_optimization?.enabled ? `Удобные объёмы воды · допуск: ${protocolDilutionTolerance(savedDilutionSettings)}. Отмеченные строки требуют решения сотрудника.` : null} />
       {hasCalculations ? <div className="protocol-print-page-shell" key="calculations">
-        <div className="protocol-print-page-label">Страница {pages.length + dilutionPages.length + 1} · Расчёты</div>
+        <div className="protocol-print-page-label">Страница {pages.length + dilutionPageCount + 1} · Расчёты</div>
         <article className="protocol-print-page protocol-print-data-page">
           <h1>Расчёты · {name || 'Протокол'}</h1>
           <div className="protocol-print-meta"><div><span>Дата</span><strong>{displayDate(protocolDate)}</strong></div><div><span>№</span><strong>{protocolNo}</strong></div><div className="protocol-print-name"><span>Название</span><strong>{name || '—'}</strong></div><div><span>Объектов</span><strong>{objectCount}</strong></div></div>
@@ -126,9 +117,9 @@ export function ProtocolPrintDocument({ protocolDate, protocolNo, name, stages, 
   )
 }
 
-export function protocolPrintPageCount(preview: ProtocolPreview, selectedStageTypes: ProtocolStageType[], dilutionView: DilutionView, includeDilutions: boolean) {
+export function protocolPrintPageCount(preview: ProtocolPreview, selectedStageTypes: ProtocolStageType[], dilutionView: DilutionView, includeDilutions: boolean, measuredDilutionPageCount = 1) {
   const plates = selectedStageTypes.reduce((total, stageType) => total + (stageType === 'pcr' || stageType === 'electrophoresis' ? preview.layouts.pcr.plates.length : preview.layouts.source.plates.length), 0)
-  const dilutionPages = includeDilutions ? dilutionSupplementPageCount(preview.dilutions, dilutionView) : 0
+  const dilutionPages = includeDilutions && visibleDilutions(preview.dilutions, dilutionView).length ? measuredDilutionPageCount : 0
   const calculations = selectedStageTypes.some((stage) => (stage === 'pcr' || stage === 'electrophoresis') && protocolReagentRows(preview, stage).length > 0) ? 1 : 0
   return plates + dilutionPages + calculations
 }

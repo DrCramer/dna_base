@@ -26,8 +26,6 @@ export interface DilutionRow {
   optimization?: ProtocolDilutionOptimization | null
 }
 
-export const dilutionPageSize = 24
-
 export function visibleDilutions(rows: Array<Record<string, unknown> | DilutionRow>, view: DilutionView): DilutionRow[] {
   const normalized = rows.map((row) => {
     const source = row as Record<string, unknown>
@@ -57,10 +55,6 @@ export function visibleDilutions(rows: Array<Record<string, unknown> | DilutionR
       return ((leftValue as number) - (rightValue as number)) * direction || left.index - right.index
     })
     .map(({ row }) => row)
-}
-
-export function dilutionSupplementPageCount(rows: Array<Record<string, unknown> | DilutionRow>, view: DilutionView) {
-  return Math.ceil(visibleDilutions(rows, view).length / dilutionPageSize)
 }
 
 export function formatProtocolValue(value: unknown) {
@@ -129,6 +123,7 @@ export function ProtocolDilutionsTable({ rows, view, onHideNoDilution, onSort, p
     <section className={`protocol-dilution-section${print ? ' is-print' : ''}`}>
       {print ? <h2>Разведения</h2> : onHideNoDilution ? <div className="protocol-dilution-heading"><label><input type="checkbox" checked={view.hideNoDilution} onChange={(event) => onHideNoDilution(event.target.checked)} />Скрыть объекты без разведения</label></div> : null}
       {shown.length ? <div className="protocol-dilution-wrap"><table>
+        {print ? <colgroup>{[4, 4, 20, 12, 12, 12, 9, 9, 9, 9].map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}</colgroup> : null}
         <thead>
           <tr>
             <th className="protocol-dilution-col-plate" rowSpan={2}>Плашка</th><th className="protocol-dilution-col-well" rowSpan={2}>Лунка</th><th rowSpan={2}>Объект</th><th rowSpan={2}>Исх. конц.</th><th rowSpan={2}>Кон. конц.</th><th rowSpan={2}>Фактор</th>

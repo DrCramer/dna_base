@@ -2,7 +2,7 @@ import copy
 import math
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any, Iterable, Sequence
 
 from app.schemas.protocols import ProtocolDilutionSettings
 
@@ -56,6 +56,16 @@ def _limits(settings: ProtocolDilutionSettings) -> tuple[float, float]:
 def _accepted(error: float, settings: ProtocolDilutionSettings) -> bool:
     under, over = _limits(settings)
     return -under - EPSILON <= error <= over + EPSILON
+
+
+def _preferred_step_penalty(water: Iterable[float], grid: float) -> int:
+    return sum(not math.isclose(value / grid, round(value / grid), rel_tol=0, abs_tol=1e-7) for value in water)
+
+
+def _candidate_rank(candidate: _Candidate, settings: ProtocolDilutionSettings):
+    if settings.optimization_priority == "minimum_error":
+        return candidate.rank
+    return _preferred_step_penalty(candidate.volumes, settings.preferred_water_step_ul), *candidate.rank
 
 
 def _measurable(value: float, lower: float | None, upper: float | None, increment: float | None) -> bool:
@@ -123,7 +133,10 @@ def generate_allowed_water_candidates(
     allowed = [water for water in candidates if low - EPSILON <= water <= high + EPSILON
                and _measurable(water, policy.water_min_ul, policy.water_max_ul, policy.water_increment_ul or 1)
                and _accepted(_error(source_concentration * dna_volume / (dna_volume + water), target_concentration), settings)]
-    allowed.sort(key=lambda water: (abs(source_concentration * dna_volume / (dna_volume + water) / target_concentration - 1), water))
+    allowed.sort(key=lambda water: (
+        _preferred_step_penalty((water,), settings.preferred_water_step_ul) if settings.optimization_priority == "fewest_volumes" else 0,
+        abs(source_concentration * dna_volume / (dna_volume + water) / target_concentration - 1), water,
+    ))
     chosen = allowed[:MAX_SINGLE_CANDIDATES]
     if baseline_water_volume in allowed and baseline_water_volume not in chosen:
         chosen[-1] = float(baseline_water_volume)
@@ -163,15 +176,15 @@ def _row_candidates(row: dict[str, Any], settings: ProtocolDilutionSettings, com
             # II этап рассчитывается заново от реальной концентрации после I этапа.
             for water_two in generate_allowed_water_candidates(intermediate, target, dna[1], baseline_water_volume=baseline[1], settings=settings, common_volumes=common):
                 add((water_one, water_two))
-    ordered = sorted(candidates.values(), key=lambda candidate: candidate.rank)
+    ordered = sorted(candidates.values(), key=lambda candidate: _candidate_rank(candidate, settings))
     limit = MAX_SINGLE_CANDIDATES if len(steps) == 1 else MAX_PAIR_CANDIDATES
     chosen = ordered[:limit]
     if baseline in candidates and candidates[baseline] not in chosen:
         chosen[-1] = candidates[baseline]
-    return sorted(chosen, key=lambda item: item.rank)
+    return sorted(chosen, key=lambda item: _candidate_rank(item, settings))
 
 
-def _batch_assignment(plans: dict[int, list[_Candidate]], fixed_water: set[float]) -> dict[int, _Candidate]:
+def _batch_assignment(plans: dict[int, list[_Candidate]], fixed_water: set[float], preferred_step: float) -> dict[int, _Candidate]:
     selected = set(fixed_water)
     uncovered = set(plans)
     assignments: dict[int, _Candidate] = {}
@@ -188,7 +201,7 @@ def _batch_assignment(plans: dict[int, list[_Candidate]], fixed_water: set[float
             assignments.update(free)
             uncovered.difference_update(free)
             continue
-        chosen = min(covers, key=lambda water: (-len(covers[water]) / len(water), -len(covers[water]), sum(abs(item.error) for item in covers[water].values()), water))
+        chosen = min(covers, key=lambda water: (-len(covers[water]) / len(water), -len(covers[water]), _preferred_step_penalty(water, preferred_step), sum(abs(item.error) for item in covers[water].values()), water))
         selected.update(chosen)
     return assignments
 
@@ -218,15 +231,16 @@ def optimize_dilution_water_batches(rows: list[dict[str, Any]], settings: Protoc
     def objective(assignment):
         volumes = fixed_water | {water for item in assignment.values() for water in item.water}
         error = sum(abs(item.error) for item in assignment.values())
-        return (error, len(volumes)) if settings.optimization_priority == "minimum_error" else (len(volumes), error)
+        # При равном числе настроек выбираем удобный шаг в любую сторону, затем меньшую ошибку.
+        return (error, len(volumes)) if settings.optimization_priority == "minimum_error" else (len(volumes), _preferred_step_penalty(volumes, settings.preferred_water_step_ul), error)
 
     if settings.optimization_priority == "minimum_error":
         assignments = {index: min(candidates, key=lambda item: item.rank) for index, candidates in ready.items()}
     else:
-        greedy = _batch_assignment(ready, fixed_water)
+        greedy = _batch_assignment(ready, fixed_water, settings.preferred_water_step_ul)
         assignments = min((incumbent, greedy), key=objective)
         selected = fixed_water | {water for candidate in assignments.values() for water in candidate.water}
-        assignments = {index: min((candidate for candidate in candidates if set(candidate.water).issubset(selected)), key=lambda item: item.rank) for index, candidates in ready.items()}
+        assignments = {index: min((candidate for candidate in candidates if set(candidate.water).issubset(selected)), key=lambda item: _candidate_rank(item, settings)) for index, candidates in ready.items()}
 
     for index, row in active.items():
         baseline_steps = copy.deepcopy(row["steps"])
@@ -250,7 +264,7 @@ def optimize_dilution_water_batches(rows: list[dict[str, Any]], settings: Protoc
                 raise ValueError("Рабочие объёмы не прошли итоговую проверку разведения")
             changed = candidate.water != baseline_water
             status = "optimized" if changed else "unchanged"
-            off_preferred_step = any(not math.isclose(water / settings.preferred_water_step_ul, round(water / settings.preferred_water_step_ul), rel_tol=0, abs_tol=1e-7) for water in candidate.water)
+            off_preferred_step = _preferred_step_penalty(candidate.water, settings.preferred_water_step_ul) > 0
             reason = ("Для соблюдения допуска или объединения группы выбран объём вне предпочтительного шага." if off_preferred_step else None) if changed else "Базовые объёмы сохранены: выбранное округление не улучшает общий план в установленном допуске."
             row["minimum_volume_available"] = True
             row["minimum_volume_warning"] = None

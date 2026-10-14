@@ -47,6 +47,74 @@ def test_both_upward_and_downward_candidates_can_be_accepted():
     assert 250 in candidates
 
 
+@pytest.mark.parametrize("baseline_water,step,rounded_water", [(242, 10, 240), (247, 10, 250), (242, 5, 240), (247, 5, 245), (248, 5, 250)])
+def test_single_sample_prefers_nearest_convenient_volume_in_either_direction(baseline_water, step, rounded_water):
+    source = row((baseline_water + 3) / 30)
+    result, _ = optimize_dilution_water_batches([source], settings(preferred_water_step_ul=step))
+    item = result[0]
+    assert item["baseline_steps"][0]["water_volume"] == baseline_water
+    assert item["steps"][0]["water_volume"] == rounded_water
+    assert item["steps"][0]["dna_volume"] == source["steps"][0]["dna_volume"]
+    assert item["optimization"]["status"] == "optimized"
+    assert abs(item["optimization"]["relative_error_percent"]) <= 5
+
+
+def test_batch_rounds_both_up_and_down_without_forcing_the_same_direction():
+    rows = [row((water + 3) / 30, index, threshold=1000) for index, water in enumerate([242, 247, 483, 487], start=1)]
+    result, _ = optimize_dilution_water_batches(rows, settings())
+    water = [item["steps"][0]["water_volume"] for item in result]
+    assert water[:2] == [240, 240]
+    assert water[2:] == [490, 490]
+    assert any(after < before["steps"][0]["water_volume"] for before, after in zip(rows, water))
+    assert any(after > before["steps"][0]["water_volume"] for before, after in zip(rows, water))
+    assert all(value % 10 == 0 for value in water)
+    assert optimize_dilution_water_batches(rows, settings())[0] == result
+
+
+@pytest.mark.parametrize("concentration", [117, 1000])
+def test_two_step_rounding_can_use_opposite_directions_with_valid_final_concentration(concentration):
+    source = row(concentration)
+    result, _ = optimize_dilution_water_batches([source], settings())
+    item = result[0]
+    differences = [after["water_volume"] - before["water_volume"] for before, after in zip(source["steps"], item["steps"])]
+    assert differences[0] * differences[1] < 0
+    assert all(step["water_volume"] % 10 == 0 for step in item["steps"])
+    assert [step["dna_volume"] for step in item["steps"]] == [step["dna_volume"] for step in source["steps"]]
+    assert abs(item["optimization"]["relative_error_percent"]) <= 5
+    assert item["optimization"]["actual_final_concentration"] == pytest.approx(calculate_actual_dilution_concentration(concentration, item["steps"]))
+
+
+def test_both_convenient_directions_survive_dense_common_volume_candidates():
+    candidates = generate_allowed_water_candidates(8.272, 0.1, 3, baseline_water_volume=246,
+        settings=settings(pipetting={"water_increment_ul": 0.1}), common_volumes=[index / 10 for index in range(2300, 2601)])
+    assert 240 in candidates
+    assert 250 in candidates
+    assert 246 in candidates
+    assert len(candidates) <= 32
+
+
+@pytest.mark.parametrize("limits,expected", [({"max_under_target_pct": 0}, 240), ({"max_over_target_pct": 0}, 250)])
+def test_convenient_rounding_respects_one_sided_concentration_limits(limits, expected):
+    result, _ = optimize_dilution_water_batches([row((247 + 3) / 30)], settings(**limits))
+    assert result[0]["steps"][0]["water_volume"] == expected
+
+
+def test_convenient_rounding_falls_back_when_both_neighbours_are_outside_tolerance():
+    source = row((64 + 3) / 30)
+    result, _ = optimize_dilution_water_batches([source], settings())
+    assert result[0]["steps"][0]["water_volume"] == source["steps"][0]["water_volume"]
+    assert result[0]["steps"][0]["dna_volume"] == source["steps"][0]["dna_volume"]
+    assert result[0]["optimization"]["status"] == "unchanged"
+
+
+def test_minimum_error_priority_keeps_accurate_nonrounded_baseline():
+    source = row((247 + 3) / 30)
+    result, _ = optimize_dilution_water_batches([source], settings(optimization_priority="minimum_error"))
+    assert result[0]["steps"][0]["water_volume"] == source["steps"][0]["water_volume"]
+    assert result[0]["steps"][0]["dna_volume"] == source["steps"][0]["dna_volume"]
+    assert result[0]["optimization"]["relative_error_percent"] == pytest.approx(0)
+
+
 def test_preferred_water_step_affects_candidates_and_can_be_extended():
     arguments = dict(source_concentration=8.272, target_concentration=0.1, dna_volume=3, baseline_water_volume=246)
     coarse = generate_allowed_water_candidates(**arguments, settings=settings(preferred_water_step_ul=10))
@@ -65,6 +133,7 @@ def test_batch_groups_reduce_settings_without_changing_dna_or_identity():
     assert rows == original
     assert summary["unique_water_volumes_after"] < summary["unique_water_volumes_before"]
     assert summary["blocked_object_count"] == 0
+    assert {item["steps"][0]["water_volume"] for item in result} == {65}
     for before, after in zip(rows, result):
         assert {key: after[key] for key in ("object_id", "plate_index", "well")} == {key: before[key] for key in ("object_id", "plate_index", "well")}
         assert after["steps"][0]["dna_volume"] == before["steps"][0]["dna_volume"]
@@ -211,6 +280,9 @@ async def test_preview_snapshot_and_excel_use_same_volumes_without_changing_layo
     assert preview["snapshot"]["dilutions"] == preview["dilutions"]
     assert preview["snapshot"]["dilution_optimization"] == preview["dilution_optimization"]
     assert preview["snapshot"]["dilution_settings"]["allowed_concentration_error_percent"] == 5
+    changes = [after["steps"][0]["water_volume"] - before["steps"][0]["water_volume"] for before, after in zip(baseline["dilutions"], preview["dilutions"]) if before["steps"]]
+    assert any(change > 0 for change in changes)
+    assert any(change < 0 for change in changes)
     workbook = load_workbook(BytesIO(build_protocol_workbook(preview["snapshot"])), data_only=True)
     sheet = workbook["Dilution"]
     for excel_row, item in enumerate(preview["dilutions"], start=2):

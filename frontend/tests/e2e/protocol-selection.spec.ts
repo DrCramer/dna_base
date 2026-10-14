@@ -3,6 +3,14 @@ import { readFile } from 'node:fs/promises'
 import type { Protocol, ProtocolObject, ProtocolPayload, ProtocolPreview } from '../../src/api/types'
 import { protocolNumbers, protocolObjectIds, selectionCaption } from '../../src/components/protocols/protocolSelection'
 import { protocolPrintPageCount } from '../../src/components/protocols/ProtocolPrintDocument'
+import { paginateDilutionRowHeights } from '../../src/components/protocols/ProtocolDilutionPrintPages'
+
+test('разведения разбиваются по высоте целых строк без лимита на число объектов', () => {
+  expect(paginateDilutionRowHeights([], 600)).toEqual([])
+  expect(paginateDilutionRowHeights(Array(96).fill(15), 600)).toEqual([40, 80, 96])
+  expect(paginateDilutionRowHeights([20, 35, 10, 25], 60)).toEqual([2, 4])
+  expect(paginateDilutionRowHeights([70, 20], 60)).toEqual([1, 2])
+})
 
 test('число печатных страниц учитывает только выбранные разделы без аудита округления', () => {
   const preview = {
@@ -11,11 +19,11 @@ test('число печатных страниц учитывает только
     calculations: { pcr: [], pcr_total: { components: [{ key: 'mix', label: 'Mix', per_reaction: 10, total: 250 }] }, electrophoresis: { components: [] } },
   } as unknown as ProtocolPreview
   const view = { hideNoDilution: false, sortKey: null, directions: { first: 'asc' as const, second: 'asc' as const } }
-  expect(protocolPrintPageCount(preview, [], view, true)).toBe(2)
+  expect(protocolPrintPageCount(preview, [], view, true, 2)).toBe(2)
   expect(protocolPrintPageCount(preview, [], view, false)).toBe(0)
   expect(protocolPrintPageCount(preview, ['dna_extraction'], view, false)).toBe(2)
   expect(protocolPrintPageCount(preview, ['pcr'], view, false)).toBe(4)
-  expect(protocolPrintPageCount(preview, ['pcr'], view, true)).toBe(6)
+  expect(protocolPrintPageCount(preview, ['pcr'], view, true, 2)).toBe(6)
   expect(protocolPrintPageCount({ ...preview, dilutions: [] }, [], view, true)).toBe(0)
 })
 
@@ -108,6 +116,56 @@ async function fixture(page: Page, transform: (preview: ProtocolPreview, payload
   await page.getByRole('button', { name: 'Протоколы' }).click()
   await page.getByRole('button', { name: 'Создать', exact: true }).click()
   return { objects, saved: () => saved, selectionRequests: () => selectionRequests, previewRequests: () => previewRequests, delay: (range: string) => { delayedRange = range }, delayedRangeRequested: () => delayedRangeRequested }
+}
+
+for (const { count, longNames } of [{ count: 25, longNames: false }, { count: 96, longNames: false }, { count: 120, longNames: false }, { count: 120, longNames: true }]) {
+  test(`печать ${count} разведений${longNames ? ' с длинными номерами' : ''} заполняет A4 по высоте без потери объектов`, async ({ page }, testInfo) => {
+    await fixture(page, (preview) => ({ ...preview, dilutions: preview.objects.map((object, index) => ({
+      object_id: Number(object.id), display_name: longNames && index % 5 === 0 ? `${object.rcsme_reg_no}-${'1234567890-'.repeat(8)}` : String(object.rcsme_reg_no),
+      plate_index: 1 + Math.floor(index / 95), well: `${'ABCDEFGH'[index % 8]}${1 + Math.floor(index / 8) % 12}`,
+      source_concentration: 2.2, target_concentration: 0.1, total_factor: 22, available: true,
+      steps: [{ dna_volume: 3, water_volume: 63 + index }],
+    })) }))
+    await page.getByRole('button', { name: 'Партии протокола' }).click()
+    await page.locator('.multi-party-modal input[type=checkbox]').check()
+    await page.getByRole('button', { name: 'Готово' }).click()
+    await page.getByPlaceholder('№ рег РЦСМЭ до').fill(`${3000 + count}-1`)
+    await expect(page.locator('.protocol-selection-actions strong')).toHaveText(`Выбрано: ${count}`)
+    await expect(page.getByRole('button', { name: 'Предпросмотр печати' })).toBeEnabled()
+    await page.getByRole('button', { name: 'Предпросмотр печати' }).click()
+    const selection = page.getByRole('dialog', { name: 'Что печатать', exact: true })
+    for (const stage of ['Выделение', 'RT', 'PCR', 'Форез']) await selection.getByLabel(stage, { exact: true }).uncheck()
+    await selection.getByRole('button', { name: 'Предпросмотр', exact: true }).click()
+    const pages = page.locator('.protocol-print-dilutions-page')
+    const rows = pages.locator('tbody tr')
+    await expect(rows).toHaveCount(count)
+    await expect(page.locator('.protocol-print-measure')).toHaveCount(0)
+    const pageCount = await pages.count()
+    expect(pageCount).toBeLessThanOrEqual(Math.ceil(count / (longNames ? 25 : 30)))
+    if (count === 25) expect(pageCount).toBe(1)
+    await expect(page.locator('.protocol-preview-toolbar strong')).toContainText(`страниц: ${pageCount}`)
+    expect(await rows.locator('td:nth-child(3)').allTextContents()).toEqual(Array.from({ length: count }, (_, index) => longNames && index % 5 === 0 ? `${3001 + index}-1-${'1234567890-'.repeat(8)}` : `${3001 + index}-1`))
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(pages).toHaveCount(pageCount)
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.emulateMedia({ media: 'print' })
+    await page.evaluate(() => document.body.classList.add('protocol-printing'))
+    const geometry = await pages.evaluateAll((pages) => pages.map((page) => {
+      const rect = page.getBoundingClientRect()
+      const style = getComputedStyle(page)
+      const rows = Array.from(page.querySelectorAll('tbody tr')).map((row) => row.getBoundingClientRect())
+      return { count: rows.length, first: rows[0].top, last: rows.at(-1)!.bottom, bottom: rect.bottom - parseFloat(style.paddingBottom) - parseFloat(style.borderBottomWidth), firstHeight: rows[0].height, fitsWidth: page.scrollWidth <= page.clientWidth + 1 }
+    }))
+    geometry.forEach((page, index) => {
+      expect(page.last).toBeLessThanOrEqual(page.bottom + 1)
+      expect(page.fitsWidth).toBe(true)
+      if (index < geometry.length - 1) expect(page.bottom - page.last).toBeLessThanOrEqual(geometry[index + 1].firstHeight + 3)
+    })
+    await page.pdf({ path: testInfo.outputPath(`dilutions-${count}.pdf`), preferCSSPageSize: true, printBackground: false })
+    await pages.first().screenshot({ path: testInfo.outputPath(`dilutions-${count}.png`) })
+    await page.evaluate(() => document.body.classList.remove('protocol-printing'))
+    await page.emulateMedia({ media: 'screen' })
+  })
 }
 
 test('диапазон и описание отмечают объекты, ручной выбор сохраняется и выгружается', async ({ page }, testInfo) => {
