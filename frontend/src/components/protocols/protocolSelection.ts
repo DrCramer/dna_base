@@ -13,7 +13,8 @@ export function protocolNumbers(objects: Array<Record<string, unknown>>): string
     const id = item.id ?? item.object_id
     if (typeof id !== 'number' || seen.has(id)) return []
     seen.add(id)
-    return typeof item.rcsme_reg_no === 'string' && item.rcsme_reg_no.trim() ? [item.rcsme_reg_no.trim()] : []
+    const number = item.display_name ?? item.rcsme_reg_no
+    return typeof number === 'string' && number.trim() ? [number.trim()] : []
   }).join('\n')
 }
 

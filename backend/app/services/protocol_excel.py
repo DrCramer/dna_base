@@ -60,16 +60,16 @@ def build_protocol_workbook(snapshot: dict[str, Any]) -> bytes:
             cell.border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
             cell.alignment = Alignment(vertical="top", wrap_text=True)
     for key, title in (("source", "Исходная плашка"), ("pcr", "PCR")):
-        for plate in snapshot["layouts"][key]["plates"]:
+        for plate in snapshot["layouts"].get(key, {}).get("plates", []):
             _plate_sheet(workbook, f"{title} {plate['plate_index']}", plate)
 
     calculations = workbook.create_sheet("Расчёты")
     calculations.append(["Этап", "Плашка", "Компонент", "На реакцию", "Всего"])
     for block in snapshot["calculations"].get("pcr", []):
         for component in block["components"]:
-            calculations.append(["PCR", block["plate_index"], component["label"], component["per_reaction"], component["total"]])
-    for component in snapshot["calculations"]["electrophoresis"]["components"]:
-        calculations.append(["Форез", "", component["label"], component["per_reaction"], component["total"]])
+            calculations.append(["PCR", block["plate_index"], component["label"], component["per_reaction"], None if component.get("key") == "dna" else component["total"]])
+    for component in snapshot["calculations"].get("electrophoresis", {}).get("components", []):
+        calculations.append(["Форез", "", component["label"], component["per_reaction"], None if component.get("key") == "pcr_products" else component["total"]])
     for cell in calculations[1]:
         cell.font = Font(bold=True)
         cell.fill = PatternFill("solid", fgColor="D9EAF7")
@@ -77,6 +77,10 @@ def build_protocol_workbook(snapshot: dict[str, Any]) -> bytes:
     dilution = workbook.create_sheet("Dilution")
     optimization = snapshot.get("dilution_optimization") or {}
     dilution_headers = ["Плашка", "Лунка", "Объект", "Исх. конц.", "Кон. конц.", "Фактор", "Фактор I", "ДНК I", "H₂O I", "Фактор II", "ДНК II", "H₂O II"]
+    show_targets = bool((snapshot.get("dilution_settings") or {}).get("show_all_targets") or (snapshot.get("dilution_settings") or {}).get("target_overrides"))
+    rt_by_object = {obj.get("id"): obj.get("rt") or {} for obj in snapshot["objects"]}
+    if show_targets:
+        dilution_headers += ["Мишень", "Long", "Small", "Y", "Источник RT"]
     if optimization.get("enabled"):
         dilution_headers += ["Фактическая конц.", "Отклонение, %", "Базовая ДНК I", "Базовая H₂O I", "Базовая ДНК II", "Базовая H₂O II", "Базовая факт. конц.", "Статус округления", "Причина / примечание", "Остаток I разведения"]
     dilution.append(dilution_headers)
@@ -85,6 +89,10 @@ def build_protocol_workbook(snapshot: dict[str, Any]) -> bytes:
         first = steps[0] if steps else {}
         second = steps[1] if len(steps) > 1 else {}
         values = [item.get("plate_index"), item.get("well"), item.get("display_name"), item.get("source_concentration"), item.get("target_concentration"), item.get("total_factor"), first.get("factor"), first.get("dna_volume"), first.get("water_volume"), second.get("factor"), second.get("dna_volume"), second.get("water_volume")]
+        if show_targets:
+            targets = item.get("rt_targets") or {}
+            rt = rt_by_object.get(item.get("object_id"), {})
+            values += [item.get("active_target", "small"), targets.get("long"), targets.get("small"), targets.get("y"), rt.get("run_id") or rt.get("event_id")]
         if optimization.get("enabled"):
             metadata = item.get("optimization") or {}
             baseline = item.get("baseline_steps") or []

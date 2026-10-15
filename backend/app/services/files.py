@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import UploadFile
+from fastapi import UploadFile, HTTPException
 
 from app.core.config import get_settings
 
@@ -14,7 +14,7 @@ def ensure_storage_dirs() -> None:
         (settings.storage_dir / name).mkdir(parents=True, exist_ok=True)
 
 
-async def save_upload(upload: UploadFile, category: str = "uploads") -> tuple[str, str, Path]:
+async def save_upload(upload: UploadFile, category: str = "uploads", *, max_bytes: int | None = None) -> tuple[str, str, Path]:
     ensure_storage_dirs()
     settings = get_settings()
     original = Path(upload.filename or "upload.bin").name
@@ -24,8 +24,14 @@ async def save_upload(upload: UploadFile, category: str = "uploads") -> tuple[st
     category_dir = settings.storage_dir / category
     category_dir.mkdir(parents=True, exist_ok=True)
     path = category_dir / upload_id
+    total = 0
     with path.open("wb") as fh:
         while chunk := await upload.read(1024 * 1024):
+            total += len(chunk)
+            if max_bytes is not None and total > max_bytes:
+                fh.close()
+                path.unlink(missing_ok=True)
+                raise HTTPException(status_code=413, detail="Файл превышает допустимый размер")
             digest.update(chunk)
             fh.write(chunk)
     meta = {

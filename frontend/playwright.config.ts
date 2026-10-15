@@ -6,7 +6,7 @@ export default defineConfig({
   fullyParallel: false,
   reporter: 'list',
   use: {
-    baseURL: 'http://127.0.0.1:4001',
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:4001',
     channel: 'chrome',
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure'

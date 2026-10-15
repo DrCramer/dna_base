@@ -57,8 +57,10 @@ class RowsResult:
 class QueueSession:
     def __init__(self, *results):
         self.results = list(results)
+        self.statements = []
 
     async def execute(self, _statement):
+        self.statements.append(_statement)
         return self.results.pop(0)
 
 
@@ -135,6 +137,7 @@ async def test_protocol_snapshot_uses_small_quantity_without_long_or_y_fallback(
 
     snapshots = await protocol_object_snapshots(session, [1])
 
+    assert "raw_registry_json" not in str(session.statements[0])
     assert snapshots[0]["rt"] == {
         "event_id": 15,
         "small_quantity": None,

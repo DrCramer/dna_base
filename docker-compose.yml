@@ -19,10 +19,13 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     restart: unless-stopped
+    mem_limit: ${BACKEND_MEMORY_LIMIT:-2g}
+    memswap_limit: ${BACKEND_MEMORY_SWAP_LIMIT:-2g}
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dna}:${POSTGRES_PASSWORD:-dna}@postgres:5432/${POSTGRES_DB:-dna_registry}
       SECRET_KEY: ${SECRET_KEY:-change-this-secret-before-production}
       STORAGE_DIR: ${STORAGE_DIR:-/app/data}
+      PROTOCOL_MAX_OBJECTS: ${PROTOCOL_MAX_OBJECTS:-2000}
       PRINT_DATA_DIR: ${PRINT_DATA_DIR:-/app/data/print}
       PRINT_JOB_TTL_HOURS: ${PRINT_JOB_TTL_HOURS:-2}
       PRINT_MAX_UPLOAD_MB: ${PRINT_MAX_UPLOAD_MB:-500}

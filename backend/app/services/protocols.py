@@ -1,4 +1,5 @@
 import asyncio
+import math
 from collections import defaultdict
 from datetime import date
 from typing import Any
@@ -6,6 +7,7 @@ from typing import Any
 from fastapi import HTTPException
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.models import (
     Employee,
@@ -20,10 +22,13 @@ from app.models import (
     StageEvent,
 )
 from app.schemas import ProtocolPreviewRequest
+from app.core.config import get_settings
+from app.services.protocol_resources import protocol_calculation_gate, validate_protocol_size
 from app.services.protocol_calculations import (
     aggregate_pcr_reagents,
     calculate_dilution,
     calculate_electrophoresis_reagents,
+    calculate_electrophoresis_plate_reagents,
     calculate_pcr_reagents,
 )
 from app.services.protocol_plate import (
@@ -34,6 +39,8 @@ from app.services.protocol_plate import (
 )
 from app.services.realtime_details import get_latest_realtime_details
 from app.services.protocol_dilution_optimizer import optimize_dilution_water_batches
+from app.services.genetic_protocols import genetic_object_snapshots
+from app.services.protocol_import_layout import apply_imported_layouts
 
 
 STAGE_ORDER = ("dna_extraction", "realtime", "pcr", "electrophoresis")
@@ -41,16 +48,16 @@ STAGE_ORDER = ("dna_extraction", "realtime", "pcr", "electrophoresis")
 
 def protocol_object_count(objects: list[dict[str, Any]]) -> int:
     return len({
-        item["id"] if item.get("id") is not None else item.get("object_id")
+        (item.get("source_kind", "chs"), item["id"] if item.get("id") is not None else item.get("object_id"))
         for item in objects
         if item.get("id") is not None or item.get("object_id") is not None
     })
 
 
-async def suggested_protocol_meta(session: AsyncSession, protocol_date: date) -> dict[str, Any]:
+async def suggested_protocol_meta(session: AsyncSession, protocol_date: date, kind: str = "chs") -> dict[str, Any]:
     current = (
         await session.execute(
-            select(func.max(LabProtocol.protocol_no)).where(LabProtocol.protocol_date == protocol_date)
+            select(func.max(LabProtocol.protocol_no)).where(LabProtocol.protocol_date == protocol_date, LabProtocol.kind == kind)
         )
     ).scalar_one_or_none()
     number = int(current or 0) + 1
@@ -58,6 +65,7 @@ async def suggested_protocol_meta(session: AsyncSession, protocol_date: date) ->
         "protocol_date": protocol_date,
         "suggested_no": number,
         "suggested_name": f"{protocol_date:%d-%m-%y}_{number}",
+        "max_objects": get_settings().protocol_max_objects,
     }
 
 
@@ -69,6 +77,12 @@ async def protocol_object_snapshots(
     rows = (
         await session.execute(
             select(RegistryObject, Party.party_no)
+            .options(load_only(
+                RegistryObject.id, RegistryObject.party_id, RegistryObject.party_no,
+                RegistryObject.case_year, RegistryObject.rcsme_reg_no, RegistryObject.decree_no,
+                RegistryObject.external_military_no, RegistryObject.object_type,
+                RegistryObject.object_description, RegistryObject.box_no,
+            ))
             .outerjoin(Party, Party.id == RegistryObject.party_id)
             .where(RegistryObject.id.in_(set(object_ids)), RegistryObject.status != "archived")
         )
@@ -95,6 +109,9 @@ async def protocol_object_snapshots(
         snapshots.append(
             {
                 "id": obj.id,
+                "source_id": obj.id,
+                "source_kind": "chs",
+                "display_name": obj.rcsme_reg_no,
                 "party_id": obj.party_id,
                 "party_no": joined_party_no or obj.party_no,
                 "case_year": obj.case_year,
@@ -135,6 +152,7 @@ def build_protocol_dilutions(
     minimum_final_volume_enabled: bool = False,
     minimum_final_volume: float = 15,
     source_available_volume: float = 50,
+    target_overrides: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     pcr_wells: dict[int, tuple[int, str]] = {}
     for plate in pcr_plates:
@@ -144,11 +162,14 @@ def build_protocol_dilutions(
     return [
         {
             "object_id": obj["id"],
-            "display_name": obj["rcsme_reg_no"],
+            "display_name": obj.get("display_name") or obj.get("rcsme_reg_no"),
+            "source_kind": obj.get("source_kind", "chs"),
+            "active_target": (target_overrides or {}).get(f"{obj.get('source_kind', 'chs')}:{obj['id']}", "small"),
+            "rt_targets": {target: (obj.get("rt") or {}).get(f"{target}_quantity") for target in ("long", "small", "y")},
             "plate_index": pcr_wells.get(obj["id"], (None, None))[0],
             "well": pcr_wells.get(obj["id"], (None, None))[1],
             **calculate_dilution(
-                obj["rt"]["concentration"] if obj.get("rt") else None,
+                dilution_source_concentration(obj, (target_overrides or {}).get(f"{obj.get('source_kind', 'chs')}:{obj['id']}", "small")),
                 target_concentration=target_concentration,
                 source_dna_volume=source_dna_volume,
                 dilution_one_volume=dilution_one_volume,
@@ -160,6 +181,12 @@ def build_protocol_dilutions(
         }
         for obj in objects
     ]
+
+
+def dilution_source_concentration(obj: dict[str, Any], target: str) -> float | None:
+    rt = obj.get("rt") or {}
+    value = rt.get(f"{target}_quantity", rt.get("concentration") if target == "small" else None)
+    return float(value) if isinstance(value, (int, float)) and math.isfinite(value) and value > 0 else None
 
 
 async def _stage_snapshots(
@@ -238,10 +265,23 @@ async def _stage_snapshots(
 async def build_protocol_snapshot(
     session: AsyncSession, payload: ProtocolPreviewRequest
 ) -> dict[str, Any]:
-    objects = await protocol_object_snapshots(session, payload.object_ids)
+    validate_protocol_size(payload.object_ids)
+    return await protocol_calculation_gate.run(lambda: _build_protocol_snapshot(session, payload))
+
+
+async def _build_protocol_snapshot(
+    session: AsyncSession, payload: ProtocolPreviewRequest
+) -> dict[str, Any]:
+    objects = await genetic_object_snapshots(session, payload.object_ids, payload.examination_year) if payload.kind == "genetic_examination" else await protocol_object_snapshots(session, payload.object_ids)
+    allowed_targets = {f"{payload.kind}:{obj['id']}" for obj in objects}
+    if set(payload.dilution.target_overrides) - allowed_targets:
+        raise HTTPException(status_code=400, detail="Мишень относится к объекту другого вида или вне выбранного состава")
+    if payload.imported_wells:
+        by_id = {obj["id"]: obj for obj in objects}
+        objects = [by_id[obj_id] for obj_id in payload.object_ids]
     stages, profiles = await _stage_snapshots(session, payload)
     rules = payload.plate_rules.model_dump()
-    layouts = build_protocol_layouts(objects, rules)
+    layouts = apply_imported_layouts(build_protocol_layouts(objects, rules), payload.imported_wells, objects)
     pcr_profile = profiles.get("pcr")
     electrophoresis_profile = profiles.get("electrophoresis")
     electrophoresis_stage = next(item for item in stages if item["stage_type"] == "electrophoresis")
@@ -265,6 +305,11 @@ async def build_protocol_snapshot(
             electrophoresis_profile.reagent_config_json if electrophoresis_profile else {},
             electrophoresis_stage["sequencer_name"],
         ),
+        "electrophoresis_plates": calculate_electrophoresis_plate_reagents(
+            pcr_plates,
+            electrophoresis_profile.reagent_config_json if electrophoresis_profile else {},
+            electrophoresis_stage["sequencer_name"],
+        ),
     }
     dilution_settings = payload.dilution.model_dump()
     dilutions = []
@@ -280,6 +325,7 @@ async def build_protocol_snapshot(
             minimum_final_volume_enabled=payload.dilution.minimum_final_volume_enabled,
             minimum_final_volume=payload.dilution.minimum_final_volume,
             source_available_volume=payload.dilution.source_available_volume,
+            target_overrides=payload.dilution.target_overrides,
         )
         if payload.dilution.optimize_water_volumes:
             dilutions, dilution_optimization = await asyncio.to_thread(optimize_dilution_water_batches, dilutions, payload.dilution)
@@ -287,12 +333,15 @@ async def build_protocol_snapshot(
     warnings = list(layouts["warnings"])
     if missing_concentration:
         warnings.append(
-            f"У {missing_concentration} объектов нет концентрации RT. Расчёт разведений для них недоступен."
+            f"У {missing_concentration} объектов нет пригодной концентрации выбранной мишени RT. Расчёт разведений для них недоступен."
         )
     if dilution_optimization and dilution_optimization["blocked_object_count"]:
         warnings.append(f"У {dilution_optimization['blocked_object_count']} объектов разведение требует проверки: не найден вариант, соответствующий допуску и ограничениям объёмов.")
     snapshot = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "kind": payload.kind,
+        "examination_year": payload.examination_year,
+        "imported_wells": [cell.model_dump() for cell in payload.imported_wells],
         "protocol": {
             "protocol_date": payload.protocol_date.isoformat(),
             "protocol_no": payload.protocol_no,
@@ -312,7 +361,7 @@ async def build_protocol_snapshot(
     }
     return {
         "selected_count": protocol_object_count(objects),
-        "capacity": plate_capacity(rules),
+        "capacity": layouts["source"]["capacity"],
         "max_capacity": 96,
         "objects": objects,
         "stages": stages,
@@ -328,6 +377,16 @@ async def build_protocol_snapshot(
 async def replace_protocol_relations(
     session: AsyncSession, protocol: LabProtocol, snapshot: dict[str, Any]
 ) -> None:
+    source_kind = snapshot.get("kind", "chs")
+    selected = {obj["id"] for obj in snapshot["objects"]}
+    if source_kind not in {"chs", "genetic_examination"} or any(obj.get("source_kind", source_kind) != source_kind for obj in snapshot["objects"]):
+        raise HTTPException(status_code=400, detail="Протокол содержит объекты другого источника")
+    for layout in snapshot["layouts"].values():
+        for plate in layout.get("plates", []) if isinstance(layout, dict) else []:
+            for well in plate["wells"]:
+                object_id = well.get("object_id")
+                if (well["kind"] == "sample" and object_id not in selected) or (well["kind"] != "sample" and object_id is not None):
+                    raise HTTPException(status_code=400, detail="Некорректная связь объекта и лунки")
     for model in (LabProtocolWell, LabProtocolObject, LabProtocolStage):
         await session.execute(delete(model).where(model.protocol_id == protocol.id))
     await session.flush()
@@ -365,7 +424,8 @@ async def replace_protocol_relations(
         session.add(
             LabProtocolObject(
                 protocol_id=protocol.id,
-                object_id=obj["id"],
+                object_id=obj["id"] if snapshot.get("kind", "chs") == "chs" else None,
+                genetic_examination_object_id=obj["id"] if snapshot.get("kind") == "genetic_examination" else None,
                 party_id=obj.get("party_id"),
                 order_index=obj["order_index"],
                 rcsme_no_snapshot=obj.get("rcsme_reg_no"),
@@ -391,7 +451,8 @@ async def replace_protocol_relations(
                         plate_index=plate["plate_index"],
                         well=well["well"],
                         kind=well["kind"],
-                        object_id=well.get("object_id"),
+                        object_id=well.get("object_id") if snapshot.get("kind", "chs") == "chs" else None,
+                        genetic_examination_object_id=well.get("object_id") if snapshot.get("kind") == "genetic_examination" else None,
                         label=well.get("display_name") or well.get("label"),
                         order_index=well["order_index"],
                         snapshot_json=well,

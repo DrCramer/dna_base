@@ -12,7 +12,7 @@ def natural_key(value: str | None) -> tuple[Any, ...]:
 
 
 def sort_protocol_objects(objects: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    return sorted(objects, key=lambda item: (natural_key(item.get("rcsme_reg_no")), item.get("id") or 0))
+    return sorted(objects, key=lambda item: (natural_key(item.get("display_name") or item.get("rcsme_reg_no")), item.get("id") or 0))
 
 
 def source_plate_rules(overrides: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -56,7 +56,9 @@ def _well(
         "well": well,
         "kind": kind,
         "object_id": obj.get("id") if obj else None,
-        "display_name": obj.get("rcsme_reg_no") if obj else label,
+        "display_name": (obj.get("display_name") or obj.get("rcsme_reg_no")) if obj else label,
+        "source_kind": obj.get("source_kind", "chs") if obj else None,
+        "source_id": obj.get("source_id", obj.get("id")) if obj else None,
         "label": label,
         "order_index": order_index,
         "object_snapshot": obj or None,

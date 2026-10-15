@@ -834,6 +834,7 @@ export interface ProtocolStageSettings {
   sequencer_name: string | null
   comment: string | null
   performer_ids: number[]
+  performers?: Array<{ employee_id: number | null; display_name: string; role?: string | null }>
   settings: Record<string, unknown>
 }
 
@@ -868,6 +869,8 @@ export interface ProtocolPipettingConstraints {
 
 export interface ProtocolDilutionSettings {
   enabled: boolean
+  show_all_targets?: boolean
+  target_overrides?: Record<string, DilutionTarget>
   target_concentration: number
   source_dna_volume: number
   dilution_one_volume: number
@@ -921,6 +924,9 @@ export interface ProtocolDilutionOptimizationSummary {
 }
 
 export interface ProtocolPayload {
+  kind?: ProtocolKind
+  examination_year?: number | null
+  imported_wells?: ProtocolImportedWell[]
   protocol_date: string
   protocol_no: number
   name: string
@@ -968,6 +974,7 @@ export interface ProtocolPreview {
     pcr: Array<Record<string, unknown>>
     pcr_total?: Record<string, unknown>
     electrophoresis: Record<string, unknown>
+    electrophoresis_plates?: Array<Record<string, unknown>>
   }
   dilutions: Array<Record<string, unknown>>
   dilution_optimization?: ProtocolDilutionOptimizationSummary | null
@@ -977,6 +984,8 @@ export interface ProtocolPreview {
 
 export interface ProtocolSummary {
   id: number
+  kind?: ProtocolKind
+  examination_names?: string[]
   series_key: string
   protocol_no: number
   protocol_date: string
@@ -999,6 +1008,7 @@ export interface ProtocolList {
 
 export interface Protocol {
   id: number
+  kind?: ProtocolKind
   series_key: string
   protocol_no: number
   protocol_date: string
@@ -1012,4 +1022,79 @@ export interface Protocol {
   finalized_at: string | null
   snapshot: Record<string, unknown>
   revisions: Array<{ id: number; revision_no: number; status: ProtocolStatus; updated_at: string }>
+  plate_calculations?: Pick<ProtocolPreview['calculations'], 'pcr' | 'electrophoresis_plates'>
+}
+
+export type ProtocolKind = 'chs' | 'genetic_examination'
+export type DilutionTarget = 'long' | 'small' | 'y'
+export interface ProtocolImportedWell {
+  layout_key: 'source' | 'pcr'
+  plate_index: number
+  well: string
+  kind: ProtocolWell['kind']
+  source_id: number | null
+  label: string | null
+}
+export interface GeneticObject {
+  id: number
+  source_kind: 'genetic_examination'
+  display_name: string
+  object_no_raw: string
+  object_no_normalized: string
+  examination_year: number
+  examination_no: string
+  object_index: number | null
+  description: string | null
+  rt: { long_quantity: number | null; small_quantity: number | null; y_quantity: number | null; run_id: number } | null
+}
+export interface GeneticNumberInput { raw_name: string; examination_no?: string | null; description?: string | null; source_key?: string | null }
+export interface GeneticNumbersPreview {
+  items: Array<GeneticNumberInput & { normalized_name: string; examination_year: number; object_index: number | null; existing: boolean; error: string | null }>
+  added: number
+  existing: number
+  unresolved: number
+}
+export interface GeneticApplyResult extends GeneticNumbersPreview {
+  objects: GeneticObject[]
+  object_ids: number[]
+  stages?: Array<Partial<ProtocolStageSettings> & { stage_type: ProtocolStageType }>
+  imported_wells?: ProtocolImportedWell[]
+  header?: { protocol_date?: string | null; protocol_no?: string | null; protocol_name?: string | null }
+  warnings?: string[]
+}
+export interface GeneticExcelPreview extends GeneticNumbersPreview {
+  upload_id: string
+  filename: string
+  protocol_name: string | null
+  protocol_date: string | null
+  stage_blocks: Array<{ stage_type: string; detail_data: Record<string, unknown>; performers: Array<{ raw_name: string }> }>
+  layouts: Record<string, Array<{ well: string; plate_index: number; sample_name_raw: string; normalized_sample_name: string | null; kind: string }>>
+  warnings: string[]
+}
+export interface GeneticRtSample {
+  sample_name_raw: string
+  normalized_sample_name: string
+  object_id: number | null
+  status: 'matched' | 'unmatched' | 'ambiguous'
+  candidate_ids: number[]
+  long_quantity: number | null
+  small_quantity: number | null
+  y_quantity: number | null
+  targets: Record<string, { ct?: number | null }>
+}
+export interface GeneticRtFile {
+  upload_id: string
+  filename: string
+  duplicate: boolean
+  warnings: string[]
+  samples: GeneticRtSample[]
+}
+export interface GeneticRtCommit {
+  examination_year: number
+  object_ids: number[]
+  upload_ids: string[]
+  mappings: Array<{ upload_id: string; sample_key: string; object_id: number }>
+  excluded_samples: Array<{ upload_id: string; sample_key: string }>
+  mode: 'attempt' | 'replace'
+  confirm_duplicate: boolean
 }

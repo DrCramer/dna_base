@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Check, Download, Eye, FilePenLine, Printer, Save } from 'lucide-react'
+import { ArrowLeft, Check, Download, Eye, FilePenLine, Printer, RotateCw, Save } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../api/client'
-import type { Protocol, ProtocolObjectResolve, ProtocolPayload, ProtocolPlateRules, ProtocolPreview, ProtocolSelectionSettings, ProtocolStageSettings, ProtocolStageType, User } from '../api/types'
+import type { GeneticApplyResult, GeneticObject, ProtocolKind, ProtocolImportedWell, Protocol, ProtocolObjectResolve, ProtocolPayload, ProtocolPlateRules, ProtocolPreview, ProtocolSelectionSettings, ProtocolStageSettings, ProtocolStageType, User } from '../api/types'
 import { ProtocolObjectSelector } from '../components/protocols/ProtocolObjectSelector'
+import { GeneticObjectSelector } from '../components/protocols/GeneticObjectSelector'
+import { ProtocolSourceTabs } from '../components/protocols/ProtocolSourceTabs'
 import { ProtocolPrintDocument } from '../components/protocols/ProtocolPrintDocument'
 import { ProtocolSheet } from '../components/protocols/ProtocolSheet'
 import { defaultProtocolDilution } from '../components/protocols/ProtocolDilutionOptions'
@@ -34,6 +36,7 @@ function snapshotPreview(protocol: Protocol): ProtocolPreview | null {
     dilution_optimization?: ProtocolPreview['dilution_optimization']
   }
   if (!snapshot.layouts?.source || !snapshot.layouts?.pcr) return null
+  const rtByObject = new Map((snapshot.objects || []).map((obj) => [obj.id ?? obj.object_id, obj.rt as Record<string, unknown> | null]))
   return {
     selected_count: protocolObjectIds(snapshot.objects || []).length,
     capacity: snapshot.layouts.source.capacity,
@@ -41,17 +44,21 @@ function snapshotPreview(protocol: Protocol): ProtocolPreview | null {
     objects: snapshot.objects || [],
     stages: snapshot.stages || [],
     layouts: snapshot.layouts,
-    calculations: snapshot.calculations || { pcr: [], electrophoresis: {} },
-    dilutions: snapshot.dilutions || [],
+    calculations: { ...(snapshot.calculations || { pcr: [], electrophoresis: {} }), ...protocol.plate_calculations },
+    dilutions: (snapshot.dilutions || []).map((row) => { const rt = rtByObject.get(row.object_id); return { ...row, active_target: row.active_target || 'small', source_kind: row.source_kind || protocol.kind || 'chs', rt_targets: row.rt_targets || { long: rt?.long_quantity ?? null, small: rt?.small_quantity ?? null, y: rt?.y_quantity ?? null } } }),
     dilution_optimization: snapshot.dilution_optimization || null,
     warnings: snapshot.warnings || [],
     snapshot: protocol.snapshot
   }
 }
 
-export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHandled, onBack, onProtocolId, onDirtyChange }: { user: User; protocolId: number | null; printOnOpen: boolean; onPrintHandled: () => void; onBack: () => void; onProtocolId: (id: number | null) => void; onDirtyChange: (dirty: boolean) => void }) {
+export function ProtocolsCreatePage({ user, protocolId, initialKind = 'chs', onKindChange, printOnOpen, onPrintHandled, onBack, onProtocolId, onDirtyChange }: { user: User; protocolId: number | null; initialKind?: ProtocolKind; onKindChange?: (kind: ProtocolKind) => void; printOnOpen: boolean; onPrintHandled: () => void; onBack: () => void; onProtocolId: (id: number | null) => void; onDirtyChange: (dirty: boolean) => void }) {
   const queryClient = useQueryClient()
   const [currentId, setCurrentId] = useState<number | null>(protocolId)
+  const [kind, setKind] = useState<ProtocolKind>(initialKind)
+  const [examinationYear, setExaminationYear] = useState(new Date().getFullYear())
+  const [geneticObjects, setGeneticObjects] = useState<GeneticObject[]>([])
+  const [importedWells, setImportedWells] = useState<ProtocolImportedWell[]>([])
   const [protocolDate, setProtocolDate] = useState(today)
   const [protocolNo, setProtocolNo] = useState(1)
   const [name, setName] = useState('')
@@ -63,6 +70,7 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
   const [selectionResolving, setSelectionResolving] = useState(false)
   const [selectionResolution, setSelectionResolution] = useState<ProtocolObjectResolve | null>(null)
   const [selectionError, setSelectionError] = useState<string | null>(null)
+  const [importWarnings, setImportWarnings] = useState<string[]>([])
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const uniqueSelectedIds = useMemo(() => Array.from(new Set(selectedIds)), [selectedIds])
   const partyIds = selection.party_ids
@@ -84,14 +92,15 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
   const hydratedId = useRef<number | null>(null)
   const headerEdited = useRef(false)
   const protocol = useQuery({ queryKey: ['protocol', currentId], queryFn: () => api.protocol(currentId as number), enabled: currentId !== null })
-  const meta = useQuery({ queryKey: ['protocol-meta', protocolDate], queryFn: () => api.protocolMeta(protocolDate), enabled: currentId === null })
+  const meta = useQuery({ queryKey: ['protocol-meta', protocolDate, kind], queryFn: () => api.protocolMeta(protocolDate, kind) })
+  const selectionTooLarge = uniqueSelectedIds.length > (meta.data?.max_objects ?? 2000)
   const years = useQuery({ queryKey: ['party-years'], queryFn: api.partyYears })
   useEffect(() => {
-    if (currentId !== null || dirty || !years.data?.default_year) return
+    if (kind !== 'chs' || currentId !== null || dirty || !years.data?.default_year) return
     const next = { ...selectionRef.current, case_year: years.data.default_year }
     selectionRef.current = next
     setSelection(next)
-  }, [currentId, dirty, years.data?.default_year])
+  }, [kind, currentId, dirty, years.data?.default_year])
   useEffect(() => () => {
     selectionSequence.current++
     if (selectionTimer.current !== null) window.clearTimeout(selectionTimer.current)
@@ -101,6 +110,7 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
   const profiles = useQuery({ queryKey: ['protocol-profiles'], queryFn: () => api.protocolProfiles(), staleTime: 30_000 })
   const sequencers = useQuery({ queryKey: ['reference-items', 'sequencer'], queryFn: () => api.referenceItems('sequencer'), staleTime: 30_000 })
   const readOnly = protocol.data?.status === 'final' || protocol.data?.status === 'archived' || user.role === 'viewer'
+  useEffect(() => setDilutionView((view) => ({ ...view, showAllTargets: dilutionSettings.show_all_targets })), [dilutionSettings.show_all_targets])
 
   useEffect(() => {
     if (!meta.data || currentId !== null || headerEdited.current) return
@@ -123,6 +133,12 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
     setProtocolNo(data.protocol_no)
     setName(data.name)
     setComment(data.comment || '')
+    const restoredKind = data.kind || (data.snapshot.kind === 'genetic_examination' ? 'genetic_examination' : 'chs')
+    setKind(restoredKind)
+    onKindChange?.(restoredKind)
+    setExaminationYear(typeof data.snapshot.examination_year === 'number' ? data.snapshot.examination_year : new Date().getFullYear())
+    setGeneticObjects(restoredKind === 'genetic_examination' ? (snapshot.objects || []) as unknown as GeneticObject[] : [])
+    setImportedWells(Array.isArray(data.snapshot.imported_wells) ? data.snapshot.imported_wells as ProtocolImportedWell[] : [])
     cancelSelectionResolution()
     setSelectedIds(protocolObjectIds(snapshot.objects || []))
     const restoredSelection = snapshot.selection || {
@@ -146,6 +162,7 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
         sequencer_name: typeof item?.sequencer_name === 'string' ? item.sequencer_name : null,
         comment: typeof item?.comment === 'string' ? item.comment : null,
         performer_ids: performers.flatMap((performer) => typeof performer.employee_id === 'number' ? [performer.employee_id] : []),
+        performers: Array.isArray(item?.performers) ? item.performers as NonNullable<ProtocolStageSettings['performers']> : [],
         settings: item?.settings && typeof item.settings === 'object' ? item.settings as Record<string, unknown> : {}
       }
     }))
@@ -180,28 +197,26 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
   }, [autoPrint, showPrintPreview])
 
   const payload = useMemo<ProtocolPayload>(() => ({
+    kind,
+    examination_year: kind === 'genetic_examination' ? examinationYear : null,
+    imported_wells: importedWells,
     protocol_date: protocolDate,
     protocol_no: protocolNo,
     name: name || `${protocolDate}_${protocolNo}`,
     comment: comment || null,
     object_ids: uniqueSelectedIds,
-    selection,
+    selection: kind === 'chs' ? selection : null,
     stages,
     plate_rules: plateRules,
-    dilution: dilutionSettings
-  }), [comment, dilutionSettings, name, plateRules, protocolDate, protocolNo, uniqueSelectedIds, selection, stages])
+    dilution: { ...dilutionSettings, target_overrides: Object.fromEntries(Object.entries(dilutionSettings.target_overrides || {}).filter(([key]) => uniqueSelectedIds.some((id) => key === `${kind}:${id}`))) }
+  }), [comment, dilutionSettings, name, plateRules, protocolDate, protocolNo, uniqueSelectedIds, selection, stages, kind, examinationYear, importedWells])
   const activePayload = useRef(payload)
   const calculatedPayload = useRef<ProtocolPayload | null>(null)
+  const requestedPayload = useRef<ProtocolPayload | null>(null)
   activePayload.current = payload
-  const previewMutation = useMutation({ mutationFn: api.previewProtocol, onSuccess: (result, submitted) => { if (submitted === activePayload.current) { calculatedPayload.current = submitted; setPreview(result) } } })
-  useEffect(() => {
-    if (readOnly || (currentId !== null && !dirty)) return
-    if (!uniqueSelectedIds.length) { setPreview(null); return }
-    if (selectionResolving || selectionError || selectionRangeError(selection) || !name.trim()) return
-    const timer = window.setTimeout(() => previewMutation.mutate(payload), 350)
-    return () => window.clearTimeout(timer)
-  }, [payload, readOnly, selectionResolving, selectionError, currentId, dirty, uniqueSelectedIds.length])
+  const previewMutation = useMutation({ gcTime: 0, mutationFn: api.previewProtocol, onSuccess: (result, submitted) => { if (submitted === activePayload.current) { calculatedPayload.current = submitted; setPreview(result) } } })
   const save = useMutation({
+    gcTime: 0,
     mutationFn: () => currentId ? api.updateProtocol(currentId, payload) : api.createProtocol(payload),
     onSuccess: (saved) => {
       setCurrentId(saved.id)
@@ -212,6 +227,13 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
       queryClient.invalidateQueries({ queryKey: ['protocols'] })
     }
   })
+  useEffect(() => {
+    if (readOnly || (currentId !== null && !dirty)) return
+    if (!uniqueSelectedIds.length || selectionTooLarge) { setPreview(null); return }
+    if (meta.isPending || selectionResolving || selectionError || selectionRangeError(selection) || !name.trim() || previewMutation.isPending || save.isPending || requestedPayload.current === payload) return
+    const timer = window.setTimeout(() => { requestedPayload.current = payload; previewMutation.mutate(payload) }, 350)
+    return () => window.clearTimeout(timer)
+  }, [payload, readOnly, selectionResolving, selectionError, currentId, dirty, uniqueSelectedIds.length, selectionTooLarge, meta.isPending, previewMutation.isPending, save.isPending])
   const finalize = useMutation({ mutationFn: () => api.finalizeProtocol(currentId as number), onSuccess: (saved) => { queryClient.setQueryData(['protocol', saved.id], saved); queryClient.invalidateQueries({ queryKey: ['protocols'] }) } })
   const revise = useMutation({ mutationFn: () => api.reviseProtocol(currentId as number), onSuccess: (saved) => { setCurrentId(saved.id); onProtocolId(saved.id); hydratedId.current = null; queryClient.setQueryData(['protocol', saved.id], saved) } })
 
@@ -249,7 +271,61 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
   }
   function changeSelectedIds(ids: number[]) {
     cancelSelectionResolution()
+    if (importedWells.length) {
+      const adding = ids.some((id) => !uniqueSelectedIds.includes(id))
+      if (adding) {
+        if (!window.confirm('Изменение состава требует перестроить импортированную раскладку. Продолжить?')) return
+        setImportedWells([])
+      } else setImportedWells((cells) => cells.filter((cell) => cell.kind !== 'sample' || ids.includes(cell.source_id as number)))
+    }
     setSelectedIds(Array.from(new Set(ids)))
+    markDirty()
+  }
+  function changeKind(next: ProtocolKind) {
+    if (next === kind) return
+    if (dirty && !window.confirm('Есть несохранённые изменения. Переключить вид протокола и начать новый?')) return
+    cancelSelectionResolution()
+    setKind(next)
+    onKindChange?.(next)
+    setCurrentId(null); onProtocolId(null); hydratedId.current = null
+    headerEdited.current = false
+    setName(''); setComment(''); setSelectedIds([]); setGeneticObjects([]); setImportedWells([]); setPreview(null)
+    setSelection({ case_year: new Date().getFullYear(), party_ids: [], rcsme_from: null, rcsme_to: null, description: null, numbers: [] })
+    selectionRef.current = { case_year: new Date().getFullYear(), party_ids: [], rcsme_from: null, rcsme_to: null, description: null, numbers: [] }
+    setSelectionResolution(null); setSelectionError(null); setImportWarnings([]); setSelectionOpen(true)
+    setStages(initialStages(protocolDate)); setPlateRules(defaultRules); setDilutionSettings(defaultProtocolDilution)
+    previewMutation.reset(); save.reset(); setDirty(false)
+  }
+  function changeExaminationYear(next: number) {
+    if (next === examinationYear) return
+    if (geneticObjects.length && !window.confirm('Смена года изменит область сопоставления и очистит выбранные объекты. Продолжить?')) return
+    setExaminationYear(next); setGeneticObjects([]); setSelectedIds([]); setImportedWells([]); setPreview(null); setDilutionSettings((settings) => ({ ...settings, target_overrides: {} })); markDirty()
+  }
+  function applyGenetic(result: GeneticApplyResult, replace: boolean) {
+    const ids = replace ? result.object_ids : Array.from(new Set([...uniqueSelectedIds, ...result.object_ids]))
+    let cells = result.imported_wells || []
+    if (!replace && cells.length && result.object_ids.some((id) => uniqueSelectedIds.includes(id))) {
+      setImportWarnings(['Лунки добавляемого Excel пересекаются с текущими объектами. Состав не изменён; используйте замену состава или импорт без лунок.'])
+      return
+    }
+    if (!replace && cells.length && previewReady && preview) {
+      const existingCells = (['source', 'pcr'] as const).flatMap((layout_key) => preview.layouts[layout_key].plates.flatMap((plate) => plate.wells.map((well) => ({ layout_key, plate_index: plate.plate_index, well: well.well, kind: well.kind, source_id: well.object_id, label: well.label }))))
+      cells = [...existingCells, ...cells.map((cell) => ({ ...cell, plate_index: cell.plate_index + Math.max(0, ...existingCells.filter((well) => well.layout_key === cell.layout_key).map((well) => well.plate_index)) }))]
+    } else if (!replace && uniqueSelectedIds.length && (importedWells.length || cells.length)) {
+      if (!window.confirm('Добавление объектов требует перестроить импортированную раскладку. Продолжить?')) return
+      cells = []
+    }
+    setGeneticObjects((previous) => replace ? result.objects : Array.from(new Map([...previous, ...result.objects].map((obj) => [obj.id, obj])).values()))
+    setSelectedIds(ids)
+    setImportedWells(cells)
+    if (result.stages?.length) setStages((current) => current.map((stage) => {
+      const patch = result.stages?.find((item) => item.stage_type === stage.stage_type)
+      return patch ? { ...stage, ...patch, settings: { ...stage.settings, ...patch.settings } } : stage
+    }))
+    if (result.header?.protocol_date) setProtocolDate(result.header.protocol_date)
+    if (result.header?.protocol_name) { setName(result.header.protocol_name); headerEdited.current = true }
+    if (result.header?.protocol_no && /^\d+$/.test(result.header.protocol_no)) { setProtocolNo(Number(result.header.protocol_no)); headerEdited.current = true }
+    setImportWarnings(result.warnings || [])
     markDirty()
   }
   const previewIds = protocolObjectIds(preview?.objects || [])
@@ -266,13 +342,19 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
     window.setTimeout(() => URL.revokeObjectURL(url), 0)
   }
   function updateStage(stageType: ProtocolStageSettings['stage_type'], patch: Partial<ProtocolStageSettings>) {
-    setStages((items) => items.map((item) => item.stage_type === stageType ? { ...item, ...patch } : item)); markDirty()
+    setStages((items) => items.map((item) => item.stage_type === stageType ? { ...item, ...patch, performers: patch.performers ?? (patch.performer_ids ? item.performers?.filter((performer) => !performer.employee_id || patch.performer_ids?.includes(performer.employee_id)) : item.performers) } : item)); markDirty()
   }
   function updateHeader(patch: { protocolDate?: string; protocolNo?: number; name?: string }) {
     headerEdited.current = true
     if (patch.protocolDate !== undefined) setProtocolDate(patch.protocolDate)
     if (patch.protocolNo !== undefined) setProtocolNo(patch.protocolNo)
     if (patch.name !== undefined) setName(patch.name)
+    markDirty()
+  }
+  function updateRules(patch: Partial<ProtocolPlateRules>) {
+    if (importedWells.length && !window.confirm('Изменение controls пересоберёт лунки вместо раскладки Excel. Продолжить?')) return
+    setImportedWells([])
+    setPlateRules((rules) => ({ ...rules, ...patch }))
     markDirty()
   }
   function requestBack() {
@@ -314,22 +396,27 @@ export function ProtocolsCreatePage({ user, protocolId, printOnOpen, onPrintHand
         <button type="button" className="icon-button" onClick={requestBack}><ArrowLeft size={17} />Назад</button>
         {currentId && (protocol.data?.revisions.length || 0) > 1 ? <select aria-label="История версий" value={currentId} onChange={(event) => { if (dirty && !window.confirm('Есть несохранённые изменения. Выйти без сохранения?')) return; const id = Number(event.target.value); setDirty(false); setCurrentId(id); onProtocolId(id); hydratedId.current = null }}><option value={currentId} disabled>Версия {protocol.data?.revision_no}</option>{protocol.data?.revisions.filter((item) => item.id !== currentId).map((item) => <option value={item.id} key={item.id}>Версия {item.revision_no} · {item.status === 'final' ? 'сохранён' : item.status === 'archived' ? 'архив' : 'черновик'}</option>)}</select> : null}
         {readOnly && protocol.data?.status === 'final' && user.role !== 'viewer' ? <button type="button" className="icon-button" disabled={revise.isPending} onClick={() => revise.mutate()}><FilePenLine size={17} />Редактировать протокол</button> : null}
-        {!readOnly ? <button type="button" className="primary compact" disabled={!uniqueSelectedIds.length || save.isPending || previewMutation.isPending || selectionResolving || Boolean(selectionError) || selectionRangeError(selection)} onClick={() => save.mutate()}><Save size={17} />Сохранить черновик</button> : null}
+        {!readOnly ? <button type="button" className="primary compact" disabled={!uniqueSelectedIds.length || selectionTooLarge || save.isPending || previewMutation.isPending || selectionResolving || Boolean(selectionError) || selectionRangeError(selection)} onClick={() => save.mutate()}><Save size={17} />Сохранить черновик</button> : null}
         {currentId && protocol.data?.status === 'draft' ? <button type="button" className="icon-button" disabled={dirty || finalize.isPending} title={dirty ? 'Сначала сохраните изменения' : ''} onClick={() => finalize.mutate()}><Check size={17} />Сохранён</button> : null}
         <button type="button" className="icon-button" disabled={!previewReady} onClick={downloadNumbers}><Download size={17} />Скачать список номеров</button>
         <button type="button" className="icon-button" disabled={!previewReady} onClick={() => openPrintSelection('preview')}><Eye size={17} />Предпросмотр печати</button>
         <button type="button" className="icon-button" disabled={!previewReady} onClick={() => openPrintSelection('print')}><Printer size={17} />Печать</button>
-        {currentId ? <a className="icon-button" href={api.protocolExcelUrl(currentId)}><Download size={17} />Скачать Excel</a> : null}
+        {currentId ? <a className="icon-button" href={api.protocolExcelUrl(currentId)}><Download size={17} />Скачать RT</a> : null}
       </div>} />
+      <ProtocolSourceTabs kind={kind} onChange={changeKind} disabled={save.isPending || previewMutation.isPending || readOnly && user.role === 'viewer'} />
       {save.error || finalize.error || revise.error || previewMutation.error ? <div className="alert danger">{String((save.error || finalize.error || revise.error || previewMutation.error) instanceof Error ? (save.error || finalize.error || revise.error || previewMutation.error)?.message : 'Не удалось выполнить действие')}</div> : null}
       <section className={`protocol-selection-panel${selectionOpen && !readOnly ? ' is-open' : ''}`}>
-        <button type="button" className="protocol-selection-summary" disabled={readOnly} onClick={() => setSelectionOpen((value) => !value)}><strong>Партии и объекты</strong><span>{partyIds.length} партий · {uniqueSelectedIds.length} объектов{selectionCaption(selection) ? <small className="protocol-selection-caption">{selectionCaption(selection)}</small> : null}</span>{!readOnly ? <em>{selectionOpen ? 'Свернуть' : 'Изменить'}</em> : null}</button>
-        {selectionOpen && !readOnly ? <div className="protocol-selection-body"><label className="protocol-year">Год <select value={year} onChange={(event) => changeSelection({ case_year: Number(event.target.value), party_ids: [] })}>{Array.from(new Set([...(years.data?.years || []), year])).map((item) => <option key={item}>{item}</option>)}</select></label><ProtocolObjectSelector selection={selection} parties={parties.data?.items || []} selectedIds={uniqueSelectedIds} onSelection={changeSelection} onSelectedIds={changeSelectedIds} selectionResolving={selectionResolving} selectionResolution={selectionResolution} /></div> : null}
+        <button type="button" className="protocol-selection-summary" disabled={readOnly} onClick={() => setSelectionOpen((value) => !value)}><strong>{kind === 'chs' ? 'Партии и объекты' : 'Экспертизы и объекты'}</strong><span>{kind === 'chs' ? `${partyIds.length} партий` : `Год экспертизы: ${examinationYear}`} · {uniqueSelectedIds.length} объектов{kind === 'chs' && selectionCaption(selection) ? <small className="protocol-selection-caption">{selectionCaption(selection)}</small> : null}</span>{!readOnly ? <em>{selectionOpen ? 'Свернуть' : 'Изменить'}</em> : null}</button>
+        {selectionOpen && !readOnly ? kind === 'chs' ? <div className="protocol-selection-body"><label className="protocol-year">Год <select value={year} onChange={(event) => changeSelection({ case_year: Number(event.target.value), party_ids: [] })}>{Array.from(new Set([...(years.data?.years || []), year])).map((item) => <option key={item}>{item}</option>)}</select></label><ProtocolObjectSelector selection={selection} parties={parties.data?.items || []} selectedIds={uniqueSelectedIds} onSelection={changeSelection} onSelectedIds={changeSelectedIds} selectionResolving={selectionResolving} selectionResolution={selectionResolution} /></div> : <div className="protocol-selection-body"><GeneticObjectSelector year={examinationYear} objects={geneticObjects} selectedIds={uniqueSelectedIds} onYear={changeExaminationYear} onSelectedIds={changeSelectedIds} onApply={applyGenetic} onRt={(objects) => { setGeneticObjects((current) => current.map((obj) => objects.find((item) => item.id === obj.id) || obj)); setDilutionSettings((settings) => ({ ...settings })); markDirty() }} /></div> : null}
       </section>
       {selectionError ? <div className="alert danger">{selectionError}</div> : null}
+      {importWarnings.length ? <details className="protocol-import-warnings"><summary>Предупреждения импорта: {importWarnings.length}</summary>{importWarnings.map((warning) => <p key={warning}>{warning}</p>)}</details> : null}
+      {selectionTooLarge && !readOnly ? <div className="alert danger">Выбрано {uniqueSelectedIds.length} объектов. Максимум в одном протоколе: {meta.data?.max_objects ?? 2000}. Уточните диапазон или разделите выборку на несколько протоколов.</div> : null}
+      {previewMutation.error && !readOnly ? <button type="button" className="icon-button" disabled={selectionTooLarge || !uniqueSelectedIds.length || selectionResolving || Boolean(selectionError) || selectionRangeError(selection) || previewMutation.isPending || save.isPending} onClick={() => { requestedPayload.current = payload; previewMutation.mutate(payload) }}><RotateCw size={17} />Повторить расчёт</button> : null}
       {preview?.warnings.map((warning) => <div className="alert warning" key={warning}>{warning}</div>)}
+      {importedWells.length ? <div className="protocol-controls print-hide"><strong>Раскладка Excel</strong>{!readOnly ? <button type="button" className="icon-button" onClick={() => { if (window.confirm('Перестроить плашки? Исходные лунки Excel будут заменены автоматической раскладкой.')) { setImportedWells([]); markDirty() } }}><RotateCw size={16} />Перестроить раскладку</button> : null}</div> : null}
       <div className="protocol-sheet-wrap">
-        <ProtocolSheet protocolDate={protocolDate} protocolNo={protocolNo} name={name} selectedCount={uniqueSelectedIds.length} stages={stages} plateRules={plateRules} preview={preview} profiles={profiles.data || []} employees={employees.data || []} sequencers={sequencers.data || []} readOnly={readOnly} dilutionView={dilutionView} dilutionSettings={dilutionSettings} onDilutionSettings={(patch) => { setDilutionSettings((current) => ({ ...current, ...patch })); markDirty() }} onDilutionHide={(hideNoDilution) => setDilutionView((view) => ({ ...view, hideNoDilution }))} onDilutionSort={sortDilutions} onHeader={updateHeader} onStage={updateStage} onRules={(patch) => { setPlateRules((rules) => ({ ...rules, ...patch })); markDirty() }} />
+        <ProtocolSheet protocolDate={protocolDate} protocolNo={protocolNo} name={name} selectedCount={uniqueSelectedIds.length} stages={stages} plateRules={plateRules} preview={preview} profiles={profiles.data || []} employees={employees.data || []} sequencers={sequencers.data || []} readOnly={readOnly} dilutionView={dilutionView} dilutionSettings={dilutionSettings} onDilutionSettings={(patch) => { setDilutionSettings((current) => ({ ...current, ...patch })); markDirty() }} onDilutionHide={(hideNoDilution) => setDilutionView((view) => ({ ...view, hideNoDilution }))} onDilutionSort={sortDilutions} onDilutionPrintSettings={(patch) => setDilutionView((view) => ({ ...view, ...patch }))} onHeader={updateHeader} onStage={updateStage} onRules={updateRules} />
       </div>
       {printSelectionOpen ? <div className="modal-backdrop" onMouseDown={() => setPrintSelectionOpen(false)}><div className="modal protocol-print-selection" role="dialog" aria-modal="true" aria-label="Что печатать" onMouseDown={(event) => event.stopPropagation()}>
         <h2>Что печатать</h2>

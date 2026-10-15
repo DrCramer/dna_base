@@ -17,6 +17,8 @@ from app.models import (
     RegistryObject,
     StageEvent,
     User,
+    GeneticExamination,
+    GeneticExaminationObject,
 )
 from app.protocol_exporters import list_exporters
 from app.schemas import (
@@ -41,7 +43,9 @@ from app.schemas import (
 )
 from app.services.audit import write_audit
 from app.services.protocol_excel import build_protocol_workbook
+from app.services.protocol_calculations import protocol_plate_calculations
 from app.services.protocol_plate import natural_key
+from app.schemas.protocols import ProtocolKind
 from app.services.protocols import (
     build_protocol_snapshot,
     protocol_object_count,
@@ -261,6 +265,7 @@ async def _object_rows(
 def _protocol_out(protocol: LabProtocol, revisions: list[LabProtocol] | None = None) -> ProtocolOut:
     return ProtocolOut(
         id=protocol.id,
+        kind=getattr(protocol, "kind", None) or (protocol.snapshot_json or {}).get("kind", "chs"),
         series_key=protocol.series_key,
         protocol_no=protocol.protocol_no,
         protocol_date=protocol.protocol_date,
@@ -273,6 +278,7 @@ def _protocol_out(protocol: LabProtocol, revisions: list[LabProtocol] | None = N
         updated_at=protocol.updated_at,
         finalized_at=protocol.finalized_at,
         snapshot=protocol.snapshot_json,
+        plate_calculations=protocol_plate_calculations(protocol.snapshot_json or {}),
         revisions=[
             ProtocolRevisionOut(id=item.id, revision_no=item.revision_no, status=item.status, updated_at=item.updated_at)
             for item in revisions or []
@@ -290,10 +296,11 @@ async def _protocol_or_404(session: AsyncSession, protocol_id: int) -> LabProtoc
 @router.get("/meta", response_model=ProtocolMetaOut)
 async def protocol_meta(
     protocol_date: date = Query(default_factory=date.today),
+    kind: ProtocolKind = "chs",
     session: AsyncSession = Depends(db_session),
     _user: User = Depends(current_user),
 ):
-    return await suggested_protocol_meta(session, protocol_date)
+    return await suggested_protocol_meta(session, protocol_date, kind)
 
 
 @router.get("/objects", response_model=ProtocolObjectListOut)
@@ -479,6 +486,9 @@ async def preview_protocol(
 @router.get("", response_model=ProtocolListOut)
 async def list_protocols(
     q: str | None = None,
+    kind: ProtocolKind = "chs",
+    examination_no: str | None = None,
+    object_no: str | None = None,
     year: int | None = Query(default=None, ge=1900, le=2200),
     status: str | None = None,
     stage_type: str | None = None,
@@ -491,13 +501,24 @@ async def list_protocols(
     session: AsyncSession = Depends(db_session),
     _user: User = Depends(current_user),
 ):
-    conditions = [LabProtocol.is_current.is_(True)]
+    conditions = [LabProtocol.is_current.is_(True), LabProtocol.kind == kind]
     if status:
         conditions.append(LabProtocol.status == status)
     else:
         conditions.append(LabProtocol.status != "archived")
-    if year:
+    if year and kind == "chs":
         conditions.append(func.extract("year", LabProtocol.protocol_date) == year)
+    if year and kind == "genetic_examination":
+        conditions.append(LabProtocol.snapshot_json["examination_year"].as_integer() == year)
+    if kind == "genetic_examination" and (examination_no or object_no):
+        genetic_conditions = [LabProtocolObject.protocol_id == LabProtocol.id]
+        if year:
+            genetic_conditions.append(GeneticExamination.examination_year == year)
+        if examination_no:
+            genetic_conditions.append(GeneticExamination.examination_no.ilike(f"%{examination_no.strip()}%"))
+        if object_no:
+            genetic_conditions.append(LabProtocolObject.snapshot_json["display_name"].as_string().ilike(f"%{object_no.strip()}%"))
+        conditions.append(exists(select(LabProtocolObject.id).join(GeneticExaminationObject, GeneticExaminationObject.id == LabProtocolObject.genetic_examination_object_id).join(GeneticExamination, GeneticExamination.id == GeneticExaminationObject.examination_id).where(*genetic_conditions)))
     if date_from:
         conditions.append(LabProtocol.protocol_date >= date_from)
     if date_to:
@@ -526,6 +547,7 @@ async def list_protocols(
             or_(
                 LabProtocol.name.ilike(needle),
                 cast(LabProtocol.protocol_no, String).ilike(needle),
+                exists(select(LabProtocolObject.id).where(LabProtocolObject.protocol_id == LabProtocol.id, or_(LabProtocolObject.snapshot_json["display_name"].as_string().ilike(needle), LabProtocolObject.snapshot_json["examination_no"].as_string().ilike(needle)))),
                 exists(select(LabProtocolObject.id).where(LabProtocolObject.protocol_id == LabProtocol.id, or_(LabProtocolObject.party_no_snapshot.ilike(needle), LabProtocolObject.rcsme_no_snapshot.ilike(needle), LabProtocolObject.decision_no_snapshot.ilike(needle), LabProtocolObject.military_no_snapshot.ilike(needle)))),
                 exists(select(LabProtocolStage.id).where(LabProtocolStage.protocol_id == LabProtocol.id, or_(LabProtocolStage.kit_name_snapshot.ilike(needle), LabProtocolStage.sequencer_name_snapshot.ilike(needle)))),
                 exists(
@@ -549,7 +571,7 @@ async def list_protocols(
     for protocol in protocols:
         snapshot = protocol.snapshot_json or {}
         objects = snapshot.get("objects", [])
-        items.append(ProtocolSummaryOut(id=protocol.id, series_key=protocol.series_key, protocol_no=protocol.protocol_no, protocol_date=protocol.protocol_date, name=protocol.name, status=protocol.status, revision_no=protocol.revision_no, object_count=protocol_object_count(objects), party_numbers=sorted({str(item.get("party_no")) for item in objects if item.get("party_no")}, key=natural_key), stage_types=[item["stage_type"] for item in snapshot.get("stages", []) if item.get("enabled")], author=authors.get(protocol.created_by_user_id), updated_at=protocol.updated_at))
+        items.append(ProtocolSummaryOut(id=protocol.id, kind=getattr(protocol, "kind", None) or snapshot.get("kind", "chs"), examination_names=sorted({f"{obj['examination_no']}-{obj['examination_year']}" for obj in objects if obj.get("examination_no") and obj.get("examination_year")}, key=natural_key), series_key=protocol.series_key, protocol_no=protocol.protocol_no, protocol_date=protocol.protocol_date, name=protocol.name, status=protocol.status, revision_no=protocol.revision_no, object_count=protocol_object_count(objects), party_numbers=sorted({str(item.get("party_no")) for item in objects if item.get("party_no")}, key=natural_key), stage_types=[item["stage_type"] for item in snapshot.get("stages", []) if item.get("enabled")], author=authors.get(protocol.created_by_user_id), updated_at=protocol.updated_at))
     return ProtocolListOut(items=items, total=total, limit=limit, offset=offset)
 
 
@@ -560,7 +582,7 @@ async def create_protocol(
     user: User = Depends(edit_user),
 ):
     preview = await build_protocol_snapshot(session, payload)
-    protocol = LabProtocol(series_key=str(uuid4()), protocol_no=payload.protocol_no, protocol_date=payload.protocol_date, name=payload.name.strip(), status="draft", revision_no=1, is_current=True, comment=payload.comment, created_by_user_id=user.id, snapshot_json=preview["snapshot"])
+    protocol = LabProtocol(kind=payload.kind, series_key=str(uuid4()), protocol_no=payload.protocol_no, protocol_date=payload.protocol_date, name=payload.name.strip(), status="draft", revision_no=1, is_current=True, comment=payload.comment, created_by_user_id=user.id, snapshot_json=preview["snapshot"])
     session.add(protocol)
     try:
         await session.flush()
@@ -595,6 +617,8 @@ async def update_protocol(
     protocol = await _protocol_or_404(session, protocol_id)
     if protocol.status != "draft":
         raise HTTPException(status_code=409, detail="Сохранённый протокол нельзя изменить. Создайте новую версию.")
+    if payload.kind != protocol.kind:
+        raise HTTPException(status_code=400, detail="Нельзя менять вид источников сохранённого протокола")
     preview = await build_protocol_snapshot(session, payload)
     protocol.protocol_no = payload.protocol_no
     protocol.protocol_date = payload.protocol_date
@@ -637,7 +661,7 @@ async def create_revision(
         return _protocol_out(current)
     current.is_current = False
     revision_no = int((await session.execute(select(func.max(LabProtocol.revision_no)).where(LabProtocol.series_key == source.series_key))).scalar_one()) + 1
-    protocol = LabProtocol(series_key=source.series_key, protocol_no=source.protocol_no, protocol_date=source.protocol_date, name=source.name, status="draft", revision_no=revision_no, is_current=True, comment=source.comment, created_by_user_id=user.id, snapshot_json=source.snapshot_json)
+    protocol = LabProtocol(kind=source.kind, series_key=source.series_key, protocol_no=source.protocol_no, protocol_date=source.protocol_date, name=source.name, status="draft", revision_no=revision_no, is_current=True, comment=source.comment, created_by_user_id=user.id, snapshot_json=source.snapshot_json)
     session.add(protocol)
     await session.flush()
     await replace_protocol_relations(session, protocol, source.snapshot_json)
@@ -656,11 +680,11 @@ async def duplicate_protocol(
 ):
     source = await _protocol_or_404(session, protocol_id)
     target_date = payload.protocol_date or date.today()
-    meta = await suggested_protocol_meta(session, target_date)
+    meta = await suggested_protocol_meta(session, target_date, source.kind)
     snapshot = {**source.snapshot_json, "protocol": {**source.snapshot_json.get("protocol", {}), "protocol_date": target_date.isoformat(), "protocol_no": meta["suggested_no"], "name": meta["suggested_name"]}}
     if not payload.copy_objects:
-        snapshot = {**snapshot, "objects": [], "dilutions": [], "layouts": {}}
-    protocol = LabProtocol(series_key=str(uuid4()), protocol_no=meta["suggested_no"], protocol_date=target_date, name=meta["suggested_name"], status="draft", revision_no=1, is_current=True, comment=source.comment, created_by_user_id=user.id, snapshot_json=snapshot)
+        snapshot = {**snapshot, "objects": [], "dilutions": [], "layouts": {}, "imported_wells": [], "calculations": {}, "selection": None, "warnings": [], "dilution_optimization": None, "dilution_settings": {**snapshot.get("dilution_settings", {}), "target_overrides": {}}}
+    protocol = LabProtocol(kind=source.kind, series_key=str(uuid4()), protocol_no=meta["suggested_no"], protocol_date=target_date, name=meta["suggested_name"], status="draft", revision_no=1, is_current=True, comment=source.comment, created_by_user_id=user.id, snapshot_json=snapshot)
     session.add(protocol)
     await session.flush()
     await replace_protocol_relations(session, protocol, snapshot)

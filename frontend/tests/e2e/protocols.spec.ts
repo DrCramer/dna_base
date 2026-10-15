@@ -117,7 +117,7 @@ test('раздел протоколов открывает создание и �
   await page.getByRole('button', { name: 'Предпросмотр печати' }).click()
   await page.getByRole('button', { name: 'Предпросмотр', exact: true }).click()
   await expect(page.locator('.protocol-print-root').getByRole('heading', { name: /^Разведения ·/ })).toBeVisible()
-  await expect(page.locator('.protocol-print-page').getByText('Протокол PCR', { exact: true })).toBeVisible()
+  await expect(page.locator('.protocol-print-page').getByText('Протокол PCR', { exact: true }).first()).toBeVisible()
   await expect(page.locator('.protocol-print-data-page .protocol-dilution-wrap th.protocol-dilution-col-plate')).toHaveCSS('white-space', 'nowrap')
   await expect(page.locator('.protocol-print-data-page .protocol-dilution-wrap table')).toHaveCSS('table-layout', 'fixed')
   await expect(page.locator('.protocol-print-root .protocol-dilution-options')).toHaveCount(0)

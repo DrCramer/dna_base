@@ -20,6 +20,13 @@ import type {
   ProtocolPayload,
   ProtocolPreview,
   ProtocolProfile,
+  ProtocolKind,
+  GeneticNumberInput,
+  GeneticNumbersPreview,
+  GeneticApplyResult,
+  GeneticExcelPreview,
+  GeneticRtFile,
+  GeneticRtCommit,
   RcsmeFixApplyResponse,
   RcsmeFixPreview,
   RegistrationBulkApplyResponse,
@@ -170,7 +177,13 @@ export const api = {
     request<{ user: User }>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
   logout: () => request('/auth/logout', { method: 'POST' }),
   dashboard: () => request<Dashboard>('/dashboard'),
-  protocolMeta: (protocolDate: string) => request<{ protocol_date: string; suggested_no: number; suggested_name: string }>(`/protocols/meta?protocol_date=${encodeURIComponent(protocolDate)}`),
+  protocolMeta: (protocolDate: string, kind: ProtocolKind = 'chs') => request<{ protocol_date: string; suggested_no: number; suggested_name: string; max_objects?: number }>(`/protocols/meta?${reportParams({ protocol_date: protocolDate, kind }).toString()}`),
+  geneticNumbersPreview: (year: number, items: GeneticNumberInput[]) => request<GeneticNumbersPreview>('/protocols/genetic-examinations/numbers/preview', { method: 'POST', body: JSON.stringify({ examination_year: year, items }) }),
+  geneticNumbersApply: (year: number, items: GeneticNumberInput[]) => request<GeneticApplyResult>('/protocols/genetic-examinations/numbers/apply', { method: 'POST', body: JSON.stringify({ examination_year: year, items }) }),
+  geneticExcelPreview: (year: number, file: File) => { const body = new FormData(); body.append('examination_year', String(year)); body.append('file', file); return request<GeneticExcelPreview>('/protocols/genetic-examinations/excel/preview', { method: 'POST', body }) },
+  geneticExcelApply: (year: number, uploadId: string, items: GeneticNumberInput[], fields: string[], stageFields: string[], wellMappings: Record<string, string>) => request<GeneticApplyResult>('/protocols/genetic-examinations/excel/apply', { method: 'POST', body: JSON.stringify({ examination_year: year, upload_id: uploadId, items, selected_fields: fields, selected_stage_fields: stageFields, well_mappings: wellMappings }) }),
+  geneticRtPreview: (year: number, ids: number[], files: File[]) => { const body = new FormData(); body.append('examination_year', String(year)); body.append('object_ids', ids.join(',')); files.forEach((file) => body.append('files', file)); return request<{ files: GeneticRtFile[] }>('/protocols/genetic-examinations/rt/preview', { method: 'POST', body }) },
+  geneticRtCommit: (payload: GeneticRtCommit) => request<{ objects: GeneticApplyResult['objects']; matched: number }>('/protocols/genetic-examinations/rt/commit', { method: 'POST', body: JSON.stringify(payload) }),
   protocolObjects: (filters: { partyIds?: number[]; caseYear?: number; selectedIds?: number[]; q?: string; description?: string; rcsmeFrom?: string; rcsmeTo?: string; numbers?: string[]; quick?: string; limit?: number; offset?: number }) => {
     const params = reportParams({ party_ids: filters.partyIds?.join(','), case_year: filters.caseYear, selected_ids: filters.selectedIds?.join(','), q: filters.q, description: filters.description, rcsme_from: filters.rcsmeFrom, rcsme_to: filters.rcsmeTo, numbers: filters.numbers?.join(','), quick: filters.quick, limit: filters.limit ?? 100, offset: filters.offset ?? 0 })
     return request<ProtocolObjectList>(`/protocols/objects?${params.toString()}`)

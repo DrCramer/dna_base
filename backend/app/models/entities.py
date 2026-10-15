@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Enum,
@@ -15,6 +16,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -604,6 +606,7 @@ class LabProtocol(Base, TimestampMixin):
     __tablename__ = "lab_protocols"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(40), default="chs", server_default="chs", index=True)
     series_key: Mapped[str] = mapped_column(String(36), index=True)
     protocol_no: Mapped[int] = mapped_column(Integer, index=True)
     protocol_date: Mapped[date] = mapped_column(Date, index=True)
@@ -635,9 +638,10 @@ class LabProtocol(Base, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("series_key", "revision_no", name="uq_lab_protocols_series_revision"),
         UniqueConstraint(
-            "protocol_date", "protocol_no", "revision_no", name="uq_lab_protocols_date_no_revision"
+            "kind", "protocol_date", "protocol_no", "revision_no", name="uq_lab_protocols_kind_date_no_revision"
         ),
         Index("ix_lab_protocols_current_status", "is_current", "status"),
+        Index("ix_lab_protocols_examination_year", text("CAST(snapshot_json->>'examination_year' AS INTEGER)"), postgresql_where=text("kind = 'genetic_examination'")),
     )
 
 
@@ -696,6 +700,9 @@ class LabProtocolObject(Base):
     object_id: Mapped[int | None] = mapped_column(
         ForeignKey("objects.id", ondelete="SET NULL"), index=True
     )
+    genetic_examination_object_id: Mapped[int | None] = mapped_column(
+        ForeignKey("genetic_examination_objects.id", ondelete="RESTRICT"), index=True
+    )
     party_id: Mapped[int | None] = mapped_column(
         ForeignKey("parties.id", ondelete="SET NULL"), index=True
     )
@@ -714,6 +721,7 @@ class LabProtocolObject(Base):
 
     __table_args__ = (
         UniqueConstraint("protocol_id", "order_index", name="uq_lab_protocol_objects_order"),
+        CheckConstraint("NOT (object_id IS NOT NULL AND genetic_examination_object_id IS NOT NULL)", name="ck_protocol_objects_source"),
     )
 
 
@@ -734,6 +742,9 @@ class LabProtocolWell(Base):
     object_id: Mapped[int | None] = mapped_column(
         ForeignKey("objects.id", ondelete="SET NULL"), index=True
     )
+    genetic_examination_object_id: Mapped[int | None] = mapped_column(
+        ForeignKey("genetic_examination_objects.id", ondelete="RESTRICT"), index=True
+    )
     label: Mapped[str | None] = mapped_column(String(255))
     order_index: Mapped[int] = mapped_column(Integer)
     snapshot_json: Mapped[dict[str, Any]] = mapped_column(json_type, default=dict)
@@ -746,7 +757,83 @@ class LabProtocolWell(Base):
         UniqueConstraint(
             "protocol_id", "layout_key", "plate_index", "well", name="uq_lab_protocol_wells_position"
         ),
+        CheckConstraint("NOT (object_id IS NOT NULL AND genetic_examination_object_id IS NOT NULL)", name="ck_protocol_wells_source"),
     )
+
+
+class GeneticExamination(Base, TimestampMixin):
+    __tablename__ = "genetic_examinations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    examination_year: Mapped[int] = mapped_column(Integer, index=True)
+    examination_no: Mapped[str] = mapped_column(String(120))
+    normalized_examination_no: Mapped[str] = mapped_column(String(120), index=True)
+    title: Mapped[str | None] = mapped_column(String(255))
+    comment: Mapped[str | None] = mapped_column(Text)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    __table_args__ = (UniqueConstraint("examination_year", "normalized_examination_no", name="uq_genetic_examination_year_no"),)
+
+
+class GeneticExaminationObject(Base, TimestampMixin):
+    __tablename__ = "genetic_examination_objects"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    examination_id: Mapped[int] = mapped_column(ForeignKey("genetic_examinations.id", ondelete="RESTRICT"), index=True)
+    object_no_raw: Mapped[str] = mapped_column(String(255))
+    object_no_normalized: Mapped[str] = mapped_column(String(255), index=True)
+    object_index: Mapped[int | None] = mapped_column(Integer)
+    display_name: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str | None] = mapped_column(Text)
+    comment: Mapped[str | None] = mapped_column(Text)
+    order_index: Mapped[int] = mapped_column(Integer)
+    __table_args__ = (UniqueConstraint("examination_id", "object_no_normalized", name="uq_genetic_object_examination_no"),)
+
+
+class GeneticExaminationRtRun(Base):
+    __tablename__ = "genetic_examination_rt_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    examination_year: Mapped[int] = mapped_column(Integer, index=True)
+    source_filename: Mapped[str] = mapped_column(String(255))
+    sha256: Mapped[str] = mapped_column(String(64), index=True)
+    run_date: Mapped[date | None] = mapped_column(Date)
+    instrument: Mapped[str | None] = mapped_column(String(255))
+    quant_method: Mapped[str | None] = mapped_column(String(255))
+    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    imported_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(json_type, default=dict)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class GeneticExaminationRtResult(Base):
+    __tablename__ = "genetic_examination_rt_results"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("genetic_examination_rt_runs.id", ondelete="CASCADE"), index=True)
+    genetic_examination_object_id: Mapped[int] = mapped_column(ForeignKey("genetic_examination_objects.id", ondelete="RESTRICT"), index=True)
+    sample_name_raw: Mapped[str] = mapped_column(String(255))
+    normalized_sample_name: Mapped[str] = mapped_column(String(255))
+    target_key: Mapped[str] = mapped_column(String(40))
+    quantity: Mapped[float | None] = mapped_column(Float)
+    ct_cq: Mapped[float | None] = mapped_column(Float)
+    di: Mapped[float | None] = mapped_column(Float)
+    well: Mapped[str | None] = mapped_column(String(40))
+    raw_json: Mapped[dict[str, Any]] = mapped_column(json_type, default=dict)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class GeneticProtocolUpload(Base):
+    __tablename__ = "genetic_protocol_uploads"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    category: Mapped[str] = mapped_column(String(40))
+    examination_year: Mapped[int] = mapped_column(Integer)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    source_filename: Mapped[str] = mapped_column(String(255))
+    sha256: Mapped[str] = mapped_column(String(64))
+    parsed_json: Mapped[dict[str, Any]] = mapped_column(json_type, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class ProtocolExport(Base):

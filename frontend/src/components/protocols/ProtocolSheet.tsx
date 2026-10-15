@@ -1,4 +1,5 @@
 import { ChevronRight, X } from 'lucide-react'
+import { useState } from 'react'
 import type { Employee, ProtocolDilutionSettings, ProtocolPlateRules, ProtocolPreview, ProtocolProfile, ProtocolStageSettings, ReferenceItem } from '../../api/types'
 import { ProtocolPlate } from './ProtocolPlate'
 import { ProtocolCalculationTables, ProtocolDilutionsTable, type DilutionSortKey, type DilutionView } from './ProtocolSupplementTables'
@@ -26,9 +27,10 @@ interface Props {
   onDilutionSettings: (patch: Partial<ProtocolDilutionSettings>) => void
   onDilutionHide: (value: boolean) => void
   onDilutionSort: (key: Exclude<DilutionSortKey, null>) => void
+  onDilutionPrintSettings: (patch: Partial<DilutionView>) => void
 }
 
-export function ProtocolSheet({ protocolDate, protocolNo, name, selectedCount, stages, plateRules, preview, profiles, employees, sequencers, readOnly, onHeader, onStage, onRules, dilutionView, dilutionSettings, onDilutionSettings, onDilutionHide, onDilutionSort }: Props) {
+export function ProtocolSheet({ protocolDate, protocolNo, name, selectedCount, stages, plateRules, preview, profiles, employees, sequencers, readOnly, onHeader, onStage, onRules, dilutionView, dilutionSettings, onDilutionSettings, onDilutionHide, onDilutionSort, onDilutionPrintSettings }: Props) {
   const sourcePlates = preview?.layouts.source.plates || []
   const pcrPlates = preview?.layouts.pcr.plates || []
   return (
@@ -52,10 +54,11 @@ export function ProtocolSheet({ protocolDate, protocolNo, name, selectedCount, s
             <section className="protocol-stage" key={stage.stage_type}>
               <h3>{stageLabels[stage.stage_type]}</h3>
               <label><span>Дата</span><input type="date" value={stage.work_date || ''} disabled={readOnly} onChange={(event) => onStage(stage.stage_type, { work_date: event.target.value || null })} /></label>
-              <label><span>Набор</span><select value={stage.profile_id || ''} disabled={readOnly} onChange={(event) => { const id = Number(event.target.value) || null; const profile = stageProfiles.find((item) => item.id === id); onStage(stage.stage_type, { profile_id: id, kit_name: profile?.name || null }) }}><option value="">—</option>{stageProfiles.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
+              <label><span>Набор</span>{readOnly ? <output>{stage.kit_name || '—'}</output> : <select value={stage.profile_id || ''} onChange={(event) => { const id = Number(event.target.value) || null; const profile = stageProfiles.find((item) => item.id === id); onStage(stage.stage_type, { profile_id: id, kit_name: profile?.name || null }) }}><option value="">{stage.kit_name || '—'}</option>{stageProfiles.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select>}</label>
               <label className="protocol-performer-select"><span>Исполнители</span><select value="" disabled={readOnly} onChange={(event) => { const id = Number(event.target.value); if (id && !stage.performer_ids.includes(id)) onStage(stage.stage_type, { performer_ids: [...stage.performer_ids, id] }) }}><option value="">Добавить...</option>{eligible.map((employee) => <option key={employee.id} value={employee.id}>{employee.short_name || employee.full_name}</option>)}</select></label>
-              <div className="protocol-performer-chips">{stage.performer_ids.map((id) => { const employee = employees.find((item) => item.id === id); return <span key={id}>{employee?.short_name || employee?.full_name || `#${id}`}{!readOnly ? <button type="button" title="Убрать исполнителя" onClick={() => onStage(stage.stage_type, { performer_ids: stage.performer_ids.filter((item) => item !== id) })}><X size={12} /></button> : null}</span> })}</div>
-              {stage.stage_type === 'electrophoresis' ? <label><span>Секвенатор</span><select value={stage.sequencer_name || ''} disabled={readOnly} onChange={(event) => onStage(stage.stage_type, { sequencer_name: event.target.value || null })}><option value="">—</option>{sequencers.map((item) => <option value={item.name} key={item.id}>{item.name}</option>)}</select></label> : null}
+              <div className="protocol-performer-chips">{stage.performer_ids.map((id) => { const employee = employees.find((item) => item.id === id); const savedName = stage.performers?.find((item) => item.employee_id === id)?.display_name; return <span key={id}>{(readOnly ? savedName : undefined) || employee?.short_name || employee?.full_name || savedName || 'Исполнитель недоступен'}{!readOnly ? <button type="button" title="Убрать исполнителя" onClick={() => onStage(stage.stage_type, { performer_ids: stage.performer_ids.filter((item) => item !== id) })}><X size={12} /></button> : null}</span> })}</div>
+              <div className="protocol-performer-chips">{(stage.performers || []).filter((item) => !item.employee_id).map((performer) => <span key={performer.display_name}>{performer.display_name}{!readOnly ? <button type="button" title="Убрать исполнителя" onClick={() => onStage(stage.stage_type, { performers: stage.performers?.filter((item) => item !== performer) })}><X size={12} /></button> : null}</span>)}</div>
+              {stage.stage_type === 'electrophoresis' ? <label><span>Секвенатор</span>{readOnly ? <output>{stage.sequencer_name || '—'}</output> : <select value={stage.sequencer_name || ''} onChange={(event) => onStage(stage.stage_type, { sequencer_name: event.target.value || null })}><option value="">—</option>{stage.sequencer_name && !sequencers.some((item) => item.name === stage.sequencer_name) ? <option>{stage.sequencer_name}</option> : null}{sequencers.map((item) => <option value={item.name} key={item.id}>{item.name}</option>)}</select>}</label> : null}
               <label><span>Комментарий</span><textarea rows={2} value={stage.comment || ''} disabled={readOnly} onChange={(event) => onStage(stage.stage_type, { comment: event.target.value || null })} /></label>
             </section>
           )
@@ -71,12 +74,12 @@ export function ProtocolSheet({ protocolDate, protocolNo, name, selectedCount, s
       {!preview ? <div className="protocol-sheet-empty">Выберите объекты, чтобы построить плашку.</div> : null}
       {sourcePlates.map((plate) => <ProtocolPlate key={`source-${plate.plate_index}`} plate={plate} title={sourcePlates.length > 1 ? `Исходная плашка ${plate.plate_index}` : 'Исходная плашка'} />)}
       {pcrPlates.map((plate) => <ProtocolPlate key={`pcr-${plate.plate_index}`} plate={plate} title={`PCR · плашка ${plate.plate_index}`} />)}
-      {preview ? <ProtocolSupplements preview={preview} dilutionView={dilutionView} dilutionSettings={dilutionSettings} readOnly={readOnly} onDilutionSettings={onDilutionSettings} onDilutionHide={onDilutionHide} onDilutionSort={onDilutionSort} /> : null}
+      {preview ? <ProtocolSupplements preview={preview} dilutionView={{ ...dilutionView, showAllTargets: dilutionSettings.show_all_targets }} dilutionSettings={dilutionSettings} readOnly={readOnly} onDilutionSettings={onDilutionSettings} onDilutionHide={onDilutionHide} onDilutionSort={onDilutionSort} onDilutionPrintSettings={onDilutionPrintSettings} /> : null}
     </article>
   )
 }
 
-function ProtocolSupplements({ preview, dilutionView, dilutionSettings, readOnly, onDilutionSettings, onDilutionHide, onDilutionSort }: {
+function ProtocolSupplements({ preview, dilutionView, dilutionSettings, readOnly, onDilutionSettings, onDilutionHide, onDilutionSort, onDilutionPrintSettings }: {
   preview: ProtocolPreview
   dilutionView: DilutionView
   dilutionSettings: ProtocolDilutionSettings
@@ -84,11 +87,23 @@ function ProtocolSupplements({ preview, dilutionView, dilutionSettings, readOnly
   onDilutionSettings: (patch: Partial<ProtocolDilutionSettings>) => void
   onDilutionHide: (value: boolean) => void
   onDilutionSort: (key: Exclude<DilutionSortKey, null>) => void
+  onDilutionPrintSettings: (patch: Partial<DilutionView>) => void
 }) {
+  const [calculationsOpen, setCalculationsOpen] = useState(false)
+  const [dilutionsOpen, setDilutionsOpen] = useState(false)
   return (
     <div className="protocol-details-blocks">
-      <details><summary>Расчёты</summary><ProtocolCalculationTables preview={preview} /></details>
-      {preview.dilutions.length ? <details><summary className="protocol-dilution-summary print-hide"><span className="protocol-details-title"><ChevronRight className="protocol-details-chevron" size={16} />Разведения</span><div className="protocol-dilution-options" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}><label><input type="checkbox" checked={dilutionView.hideNoDilution} onChange={(event) => onDilutionHide(event.target.checked)} />Скрыть объекты без разведения</label><label><input type="checkbox" checked={dilutionSettings.minimum_final_volume_enabled} disabled={readOnly} onChange={(event) => onDilutionSettings({ minimum_final_volume_enabled: event.target.checked })} />Минимальный объём 15 мкл</label><label><input type="checkbox" checked={dilutionSettings.optimize_water_volumes ?? false} disabled={readOnly} onChange={(event) => onDilutionSettings({ optimize_water_volumes: event.target.checked })} />Удобные объёмы воды</label></div></summary><ProtocolDilutionOptions settings={dilutionSettings} preview={preview} readOnly={readOnly} onChange={onDilutionSettings} /><ProtocolDilutionsTable rows={preview.dilutions} view={dilutionView} onSort={onDilutionSort} /></details> : null}
+      <details onToggle={(event) => setCalculationsOpen(event.currentTarget.open)}><summary>Расчёты</summary>{calculationsOpen ? <ProtocolCalculationTables preview={preview} /> : null}</details>
+      {preview.dilutions.length ? <details onToggle={(event) => setDilutionsOpen(event.currentTarget.open)}>
+        <summary className="protocol-dilution-summary print-hide"><span className="protocol-details-title"><ChevronRight className="protocol-details-chevron" size={16} />Разведения</span><div className="protocol-dilution-options" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+          <label><input type="checkbox" checked={dilutionView.hideNoDilution} onChange={(event) => onDilutionHide(event.target.checked)} />Скрыть объекты без разведения</label>
+          <label><input type="checkbox" checked={dilutionSettings.minimum_final_volume_enabled} disabled={readOnly} onChange={(event) => onDilutionSettings({ minimum_final_volume_enabled: event.target.checked })} />Минимальный объём 15 мкл</label>
+          <label><input type="checkbox" checked={dilutionSettings.optimize_water_volumes ?? false} disabled={readOnly} onChange={(event) => onDilutionSettings({ optimize_water_volumes: event.target.checked })} />Округление объема <strong>H₂O</strong></label>
+          <label><input type="checkbox" checked={dilutionSettings.show_all_targets ?? false} onChange={(event) => onDilutionSettings({ show_all_targets: event.target.checked })} />Все мишени</label>
+          <label><input type="checkbox" checked={dilutionView.compactPages ?? false} onChange={(event) => onDilutionPrintSettings({ compactPages: event.target.checked })} />24 объекта на страницу</label>
+        </div></summary>
+        {dilutionsOpen ? <><ProtocolDilutionOptions settings={dilutionSettings} preview={preview} readOnly={readOnly} onChange={onDilutionSettings} /><ProtocolDilutionsTable rows={preview.dilutions} view={dilutionView} onSort={onDilutionSort} onTarget={readOnly ? undefined : (row, target) => onDilutionSettings({ target_overrides: { ...dilutionSettings.target_overrides, [`${row.source_kind || 'chs'}:${row.object_id}`]: target } })} onColumnToggle={(column) => { const hidden = dilutionView.hiddenColumns || []; onDilutionPrintSettings({ hiddenColumns: hidden.includes(column) ? hidden.filter((item) => item !== column) : [...hidden, column] }) }} /></> : null}
+      </details> : null}
     </div>
   )
 }

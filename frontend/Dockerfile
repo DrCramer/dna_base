@@ -1,4 +1,6 @@
 FROM node:18-alpine AS build
+ARG NODE_OPTIONS=--max-old-space-size=512
+ENV NODE_OPTIONS=${NODE_OPTIONS}
 WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci

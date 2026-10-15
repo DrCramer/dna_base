@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,6 +14,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60 * 12
     cookie_name: str = "dna_registry_session"
     storage_dir: Path = Path("/app/data")
+    protocol_max_objects: int = Field(default=2000, ge=1, le=10000)
     cors_origins: list[str] = [
         "http://localhost:4001",
         "http://127.0.0.1:4001",

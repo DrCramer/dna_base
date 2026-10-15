@@ -1,5 +1,6 @@
 from collections.abc import Iterable
 from pathlib import Path
+import posixpath
 from typing import Any
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile
@@ -11,7 +12,7 @@ def _cell_to_python(value: Any) -> Any:
     return value
 
 
-def read_workbook(path: str | Path) -> dict[str, list[list[Any]]]:
+def read_workbook(path: str | Path, *, preserve_rows: bool = False) -> dict[str, list[list[Any]]]:
     """Read xls/xlsx/csv-like Excel files into sheet -> rows.
 
     python-calamine handles both old BIFF .xls and modern OOXML .xlsx.
@@ -28,7 +29,7 @@ def read_workbook(path: str | Path) -> dict[str, list[list[Any]]]:
             return {"CSV": [list(row) for row in csv.reader(fh)]}
 
     if suffix == ".xlsx":
-        return _read_xlsx_physical_rows(path)
+        return _read_xlsx_physical_rows(path, preserve_rows=preserve_rows)
 
     try:
         from python_calamine import load_workbook
@@ -57,7 +58,7 @@ def read_workbook(path: str | Path) -> dict[str, list[list[Any]]]:
     return sheets
 
 
-def _read_xlsx_physical_rows(path: Path) -> dict[str, list[list[Any]]]:
+def _read_xlsx_physical_rows(path: Path, *, preserve_rows: bool = False) -> dict[str, list[list[Any]]]:
     ns = {
         "m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
         "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
@@ -105,17 +106,31 @@ def _read_xlsx_physical_rows(path: Path) -> dict[str, list[list[Any]]]:
             name = sheet.attrib["name"]
             rid = sheet.attrib[f"{{{ns['r']}}}id"]
             target = rid_to_target[rid]
-            sheet_path = f"xl/{target}" if not target.startswith("xl/") else target
+            sheet_path = posixpath.normpath(target.lstrip("/") if target.startswith(("/", "xl/")) else f"xl/{target}")
             root = ET.fromstring(zf.read(sheet_path))
             rows: list[list[Any]] = []
             for row in root.findall(".//m:sheetData/m:row", ns):
                 values: list[Any] = []
                 for cell in row.findall("m:c", ns):
                     idx = col_to_idx(cell.attrib["r"])
+                    if preserve_rows and idx >= 256:
+                        if cell_value(cell, shared) != "":
+                            raise ValueError("В протоколе есть данные за пределами 256 столбцов")
+                        continue
                     while len(values) <= idx:
                         values.append("")
                     values[idx] = cell_value(cell, shared)
-                rows.append(values)
+                if preserve_rows:
+                    row_index = int(row.attrib.get("r", len(rows) + 1))
+                    if row_index > 20000:
+                        if any(value != "" for value in values):
+                            raise ValueError("В протоколе есть данные за пределами 20000 строк")
+                        continue
+                    while len(rows) < row_index:
+                        rows.append([])
+                    rows[row_index - 1] = values
+                else:
+                    rows.append(values)
             result[name] = rows
         return result
 

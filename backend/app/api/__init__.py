@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api import audit, auth, dashboard, employees, exports, files, imports, objects, parties, protocols, reference_items, reports, stage_table, work_sessions
+from app.api import audit, auth, dashboard, employees, exports, files, imports, objects, parties, protocols, reference_items, reports, stage_table, work_sessions, genetic_protocols
 
 
 api_router = APIRouter(prefix="/api")
@@ -11,6 +11,7 @@ api_router.include_router(parties.router)
 api_router.include_router(stage_table.router)
 api_router.include_router(work_sessions.router)
 api_router.include_router(protocols.router)
+api_router.include_router(genetic_protocols.router)
 api_router.include_router(employees.router)
 api_router.include_router(reference_items.router)
 api_router.include_router(reports.router)

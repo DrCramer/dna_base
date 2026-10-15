@@ -17,6 +17,7 @@ import { ElectrophoresisImportPage, RegistryImportPage, RtImportPage } from './p
 import { WorkSessionsPage } from './pages/WorkSessionsPage'
 import { ProtocolsCreatePage } from './pages/ProtocolsCreatePage'
 import { ProtocolsPage } from './pages/ProtocolsPage'
+import type { ProtocolKind } from './api/types'
 
 type ThemeMode = 'auto' | 'light' | 'dark'
 type EffectiveTheme = 'light' | 'dark'
@@ -28,6 +29,9 @@ const maxUiScale = 1.35
 const uiScaleStep = 0.1
 
 function initialView() {
+  const params = new URLSearchParams(window.location.search)
+  if (/^[1-9]\d*$/.test(params.get('protocol_id') || '')) return 'protocol-create'
+  if (params.has('protocol_kind')) return 'protocols'
   if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('report_tab')) return 'reports'
   return 'dashboard'
 }
@@ -70,7 +74,8 @@ export function App() {
   const [objectsQuery, setObjectsQuery] = useState('')
   const [partyFilter, setPartyFilter] = useState<string | null>(null)
   const [partySelect, setPartySelect] = useState<{ partyNo: string; caseYear?: number | null } | null>(null)
-  const [protocolId, setProtocolId] = useState<number | null>(null)
+  const [protocolId, setProtocolId] = useState<number | null>(() => Number(new URLSearchParams(window.location.search).get('protocol_id')) || null)
+  const [protocolKind, setProtocolKind] = useState<ProtocolKind>(() => new URLSearchParams(window.location.search).get('protocol_kind') === 'genetic_examination' ? 'genetic_examination' : 'chs')
   const [protocolPrintOnOpen, setProtocolPrintOnOpen] = useState(false)
   const [protocolDirty, setProtocolDirty] = useState(false)
   const [themeMode, setThemeMode] = useState<ThemeMode>(storedThemeMode)
@@ -174,6 +179,17 @@ export function App() {
       clearReportUrlParams()
     }
   }, [objectId, view])
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (view === 'protocols' || view === 'protocol-create') {
+      params.set('protocol_kind', protocolKind)
+      if (view === 'protocol-create' && protocolId) params.set('protocol_id', String(protocolId))
+      else params.delete('protocol_id')
+    } else {
+      params.delete('protocol_id'); params.delete('protocol_kind')
+    }
+    window.history.replaceState(null, '', `${window.location.pathname}${params.size ? `?${params}` : ''}`)
+  }, [view, protocolId, protocolKind])
 
   function changeUiScale(direction: -1 | 1) {
     setUiScale((value) => Math.min(maxUiScale, Math.max(minUiScale, Math.round((value + direction * uiScaleStep) * 10) / 10)))
@@ -217,8 +233,8 @@ export function App() {
   else if (view === 'parties') page = <PartiesPage user={user} onObjectOpen={setObjectId} onReportsOpen={openReports} initialPartyNo={partySelect?.partyNo} initialPartyYear={partySelect?.caseYear} onInitialPartyHandled={() => setPartySelect(null)} />
   else if (view === 'objects') page = <ObjectsPage initialQuery={objectsQuery} partyFilter={partyFilter} onQueryChange={setObjectsQuery} onPartyFilterChange={setPartyFilter} onOpen={setObjectId} onPartyOpen={openParty} />
   else if (view === 'work-sessions') page = <WorkSessionsPage user={user} />
-  else if (view === 'protocol-create') page = <ProtocolsCreatePage user={user} protocolId={protocolId} printOnOpen={protocolPrintOnOpen} onPrintHandled={() => setProtocolPrintOnOpen(false)} onProtocolId={setProtocolId} onDirtyChange={setProtocolDirty} onBack={() => { setProtocolDirty(false); setProtocolPrintOnOpen(false); setProtocolId(null); setView('protocols') }} />
-  else if (view === 'protocols') page = <ProtocolsPage user={user} onCreate={() => { setProtocolPrintOnOpen(false); setProtocolId(null); setView('protocol-create') }} onOpen={(id) => { setProtocolPrintOnOpen(false); setProtocolId(id); setView('protocol-create') }} onPrint={(id) => { setProtocolPrintOnOpen(true); setProtocolId(id); setView('protocol-create') }} />
+  else if (view === 'protocol-create') page = <ProtocolsCreatePage user={user} protocolId={protocolId} initialKind={protocolKind} onKindChange={setProtocolKind} printOnOpen={protocolPrintOnOpen} onPrintHandled={() => setProtocolPrintOnOpen(false)} onProtocolId={setProtocolId} onDirtyChange={setProtocolDirty} onBack={() => { setProtocolDirty(false); setProtocolPrintOnOpen(false); setProtocolId(null); setView('protocols') }} />
+  else if (view === 'protocols') page = <ProtocolsPage user={user} kind={protocolKind} onKindChange={setProtocolKind} onCreate={() => { setProtocolPrintOnOpen(false); setProtocolId(null); setView('protocol-create') }} onOpen={(id) => { setProtocolPrintOnOpen(false); setProtocolId(id); setView('protocol-create') }} onPrint={(id) => { setProtocolPrintOnOpen(true); setProtocolId(id); setView('protocol-create') }} />
   else if (view === 'search') page = <SearchPage onObjectOpen={setObjectId} onPartyOpen={openPartyInParties} />
   else if (view === 'reports') page = <ReportsPage user={user} onPartyOpen={openPartyInParties} />
   else if (view === 'employees') page = <EmployeesPage user={user} />

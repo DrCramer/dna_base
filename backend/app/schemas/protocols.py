@@ -6,6 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 StageType = Literal["dna_extraction", "realtime", "pcr", "electrophoresis"]
 ProtocolStatus = Literal["draft", "final", "archived"]
+ProtocolKind = Literal["chs", "genetic_examination"]
+DilutionTarget = Literal["long", "small", "y"]
 
 
 class ProtocolPerformerInput(BaseModel):
@@ -58,6 +60,8 @@ class ProtocolPipettingConstraints(BaseModel):
 
 class ProtocolDilutionSettings(BaseModel):
     enabled: bool = True
+    show_all_targets: bool = False
+    target_overrides: dict[str, DilutionTarget] = Field(default_factory=dict, max_length=10000)
     target_concentration: float = Field(default=0.1, gt=0, allow_inf_nan=False)
     source_dna_volume: float = Field(default=3, gt=0, allow_inf_nan=False)
     dilution_one_volume: float = Field(default=10, gt=0, allow_inf_nan=False)
@@ -84,6 +88,9 @@ class ProtocolSelectionSettings(BaseModel):
 
 
 class ProtocolPreviewRequest(BaseModel):
+    kind: ProtocolKind = "chs"
+    examination_year: int | None = Field(default=None, ge=1900, le=2200)
+    imported_wells: list["ProtocolImportedWell"] = Field(default_factory=list, max_length=40000)
     protocol_date: date
     protocol_no: int = Field(ge=1)
     name: str = Field(min_length=1, max_length=255)
@@ -98,6 +105,28 @@ class ProtocolPreviewRequest(BaseModel):
     @classmethod
     def unique_object_ids(cls, value: list[int]) -> list[int]:
         return list(dict.fromkeys(value))
+
+    @model_validator(mode="after")
+    def valid_source(self):
+        if self.kind == "genetic_examination" and self.examination_year is None:
+            raise ValueError("Год экспертизы обязателен")
+        if self.kind == "genetic_examination" and self.selection and self.selection.party_ids:
+            raise ValueError("Генетические экспертизы не относятся к партиям")
+        if self.imported_wells and self.kind != "genetic_examination":
+            raise ValueError("Импортированная раскладка относится к генетическим экспертизам")
+        return self
+
+
+class ProtocolImportedWell(BaseModel):
+    layout_key: Literal["source", "pcr"]
+    plate_index: int = Field(ge=1, le=500)
+    well: str = Field(pattern=r"^[A-H](?:[1-9]|1[0-2])$")
+    kind: Literal["sample", "ladder", "pc", "nc", "standard", "empty"]
+    source_id: int | None = None
+    label: str | None = Field(default=None, max_length=255)
+
+
+ProtocolPreviewRequest.model_rebuild()
 
 
 class ProtocolCreateRequest(ProtocolPreviewRequest):
@@ -126,6 +155,7 @@ class ProtocolMetaOut(BaseModel):
     protocol_date: date
     suggested_no: int
     suggested_name: str
+    max_objects: int = 2000
 
 
 class ProtocolObjectOut(BaseModel):
@@ -189,6 +219,8 @@ class ProtocolProfileOut(ProtocolProfileBase):
 
 
 class ProtocolSummaryOut(BaseModel):
+    kind: ProtocolKind = "chs"
+    examination_names: list[str] = Field(default_factory=list)
     id: int
     series_key: str
     protocol_no: int
@@ -218,6 +250,7 @@ class ProtocolRevisionOut(BaseModel):
 
 
 class ProtocolOut(BaseModel):
+    kind: ProtocolKind = "chs"
     id: int
     series_key: str
     protocol_no: int
@@ -232,6 +265,7 @@ class ProtocolOut(BaseModel):
     finalized_at: datetime | None
     snapshot: dict[str, Any]
     revisions: list[ProtocolRevisionOut] = Field(default_factory=list)
+    plate_calculations: dict[str, Any] = Field(default_factory=dict)
 
 
 class ProtocolDuplicateRequest(BaseModel):

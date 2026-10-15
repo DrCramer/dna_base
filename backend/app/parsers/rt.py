@@ -3,6 +3,9 @@ from datetime import date, datetime
 from pathlib import Path
 import re
 from typing import Any
+from typing import Literal
+import math
+from app.parsers.genetic_identity import genetic_key, control_kind
 
 from app.parsers.excel_reader import read_workbook
 from app.parsers.normalization import (
@@ -187,31 +190,32 @@ def _quantity(row: dict[str, Any]) -> float | None:
     return value if value is not None else row.get("mean_quantity_ng_ul")
 
 
-def _round4(value: Any) -> float | None:
+def round_rt_quantity(value: Any) -> float | None:
     if value is None:
         return None
     try:
-        return round(float(value), 4)
+        number = float(value)
+        return round(number, 4) if math.isfinite(number) else None
     except (TypeError, ValueError):
         return None
 
 
-def aggregate_rt_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def aggregate_rt_rows(rows: list[dict[str, Any]], *, policy: Literal["registry", "genetic"] = "registry") -> list[dict[str, Any]]:
     grouped: dict[str, dict[str, Any]] = {}
     for row in rows:
-        sample_name = row.get("normalized_sample_name")
-        if not _is_lab_sample(sample_name):
+        sample_name = row.get("sample_name_raw") if policy == "genetic" else row.get("normalized_sample_name")
+        if not sample_name or (policy == "registry" and not _is_lab_sample(sample_name)) or (policy == "genetic" and control_kind(sample_name)):
             continue
         lab_sample = normalize_lab_sample(sample_name)
-        key = lab_sample.normalized or sample_name
+        key = genetic_key(sample_name) if policy == "genetic" else lab_sample.normalized or sample_name
         item = grouped.setdefault(
             key,
             {
                 "sample_name_raw": row.get("sample_name_raw"),
-                "normalized_sample_name": lab_sample.normalized,
-                "sample_object_no": lab_sample.object_no,
-                "sample_base": lab_sample.base,
-                "repeat_suffix": lab_sample.repeat_suffix,
+                "normalized_sample_name": key,
+                "sample_object_no": sample_name if policy == "genetic" else lab_sample.object_no,
+                "sample_base": None if policy == "genetic" else lab_sample.base,
+                "repeat_suffix": None if policy == "genetic" else lab_sample.repeat_suffix,
                 "long_quantity": None,
                 "small_quantity": None,
                 "y_quantity": None,
@@ -223,12 +227,12 @@ def aggregate_rt_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             item["wells"].append(row.get("well"))
         target_key = row.get("target_key")
         if target_key in {"long", "small", "y"}:
-            value = _round4(_quantity(row))
+            value = round_rt_quantity(_quantity(row))
             item[f"{target_key}_quantity"] = value
             item["targets"][target_key] = {
                 "target": row.get("target"),
                 "quantity": value,
-                "ct": _round4(row.get("ct") or row.get("cq")),
+                "ct": round_rt_quantity(row.get("ct") or row.get("cq")),
                 "well": row.get("well"),
             }
     return list(grouped.values())

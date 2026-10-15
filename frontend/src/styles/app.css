@@ -36,9 +36,44 @@
 }
 
 /* Laboratory protocols */
+.protocol-source-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+.protocol-source-tabs button { background: transparent; color: var(--muted); border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 9px 12px; font-size: 13px; white-space: normal; }
+.protocol-source-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.genetic-selector-toolbar, .genetic-import-options { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; }
+.genetic-selector-toolbar label, .genetic-import-options label { display: flex; align-items: center; gap: 8px; }
+.genetic-selector-toolbar input[type=number] { width: 100px; }
+.genetic-import-summary { font-size: 13px; padding: 7px 0; overflow-wrap: anywhere; }
+.genetic-import-table { overflow: auto; max-height: 480px; margin: 10px 0; }
+.genetic-import-table table { width: 100%; min-width: 640px; border-collapse: collapse; font-size: 13px; }
+.genetic-import-table th, .genetic-import-table td { border: 1px solid var(--border); padding: 5px 7px; text-align: left; overflow-wrap: anywhere; }
+.genetic-import-table th { background: var(--table); position: sticky; top: 0; z-index: 1; }
+.genetic-import-table td small { display: block; color: var(--muted); max-width: 240px; overflow-wrap: anywhere; }
+.genetic-import-table input:not([type=checkbox]), .genetic-import-table select { width: 100%; min-width: 100px; max-width: 290px; }
+.genetic-import-table td:first-child:has(input[type=checkbox]) { width: 30px; }
+.genetic-import-modal { width: min(1180px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow: auto; border-radius: 6px; }
+.genetic-import-modal textarea { width: 100%; resize: vertical; }
+.genetic-dialog-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.genetic-dialog-title h2 { font-size: 16px; min-width: 0; overflow-wrap: anywhere; }
+.genetic-import-modal .modal-actions { flex-wrap: wrap; }
+.genetic-upload-area { border: 1px dashed var(--border-strong); padding: 10px; }
+.genetic-upload-file { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 0; }
+.genetic-upload-file span { overflow-wrap: anywhere; min-width: 0; }
+.protocol-dilution-wrap .protocol-source-target-cell { padding: 0; vertical-align: middle; }
+.protocol-rt-target { display: flex; align-items: center; justify-content: center; gap: 3px; min-height: 1.2em; margin: 0; padding: 2px 3px; font-size: inherit; color: inherit; line-height: 1.2; border-bottom: 1px solid var(--border); }
+.protocol-rt-target:last-child { border-bottom: 0; }
+.protocol-rt-target input { flex: 0 0 12px; width: 12px; height: 12px; margin: 0; }
+.protocol-rt-target.is-active { font-weight: 700; }
+.protocol-rt-quantity { font-variant-numeric: tabular-nums; }
+.protocol-import-warnings { margin: 8px 0; font-size: 13px; }
+@media (max-width: 640px) {
+  .genetic-selector-toolbar { align-items: flex-start; }
+  .genetic-selector-toolbar .icon-button { white-space: normal; }
+  .protocol-source-tabs button { padding: 8px; }
+}
 .protocol-page { max-width: 1600px; }
 .protocol-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 7px; }
 .protocol-toolbar .icon-button, .protocol-toolbar .primary { white-space: nowrap; }
+.protocol-page > .page-header { position: sticky; top: 0; z-index: 10; align-self: start; padding: 10px 0; background: var(--bg); border-bottom: 1px solid var(--border); }
 .protocol-selection-panel { border: 1px solid var(--border); background: var(--panel); margin-bottom: 12px; }
 .protocol-selection-summary { width: 100%; border: 0; border-radius: 0; padding: 10px 12px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; background: var(--panel); color: var(--text); text-align: left; }
 .protocol-selection-summary span { color: var(--muted); }
@@ -123,12 +158,18 @@
 .protocol-details-blocks details[open] > .protocol-dilution-summary .protocol-details-chevron { transform: rotate(90deg); }
 .protocol-calculation-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 0 14px 14px; }
 .protocol-calculation-columns table, .protocol-dilution-wrap table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.protocol-dilution-wrap table { table-layout: fixed; }
 .protocol-calculation-columns th, .protocol-calculation-columns td, .protocol-dilution-wrap th, .protocol-dilution-wrap td { padding: 5px 6px; border: 1px solid var(--border); text-align: left; }
 .protocol-dilution-wrap { overflow: auto; padding: 0 14px 14px; }
 .protocol-dilution-wrap .protocol-dilution-col-plate,
-.protocol-dilution-wrap .protocol-dilution-col-well { width: 1%; white-space: nowrap; }
+.protocol-dilution-wrap .protocol-dilution-col-well { white-space: nowrap; }
 .protocol-dilution-wrap tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--table) 60%, var(--panel)); }
 .protocol-dilution-wrap tbody tr:hover td { background: color-mix(in srgb, var(--accent) 9%, var(--panel)); }
+.protocol-dilution-column-toggle { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 2px 4px; font-size: 11px; }
+.protocol-dilution-column-toggle input { flex: none; width: 13px; height: 13px; margin: 0; }
+.protocol-dilution-wrap .protocol-dilution-column-hidden { width: 28px; min-width: 28px; max-width: 28px; padding: 4px; background: color-mix(in srgb, var(--table) 75%, var(--muted)) !important; color: var(--muted); }
+.protocol-dilution-column-hidden .protocol-dilution-column-toggle span { display: none; }
+.protocol-dilution-section.has-hidden-columns .protocol-dilution-object { text-align: right; padding-right: 12px; }
 .protocol-dilution-section h2 { margin: 0 0 8px; font-size: 16px; }
 .protocol-dilution-heading { display: flex; align-items: center; justify-content: flex-end; min-height: 32px; padding: 0 14px 8px; }
 .protocol-dilution-heading label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
@@ -160,13 +201,14 @@
 .protocol-supplement-empty { padding: 10px 14px; color: var(--muted); font-size: 12px; }
 .protocol-preview-backdrop { z-index: 80; padding: 20px; overflow: auto; align-items: flex-start; }
 .protocol-preview-modal { width: min(1400px, 100%); margin: auto; background: var(--bg); border: 1px solid var(--border-strong); }
-.protocol-preview-toolbar { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 9px 12px; background: var(--panel); border-bottom: 1px solid var(--border); }
+.protocol-preview-toolbar { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 9px 12px; background: var(--panel); border-bottom: 1px solid var(--border); }
 .protocol-preview-toolbar strong { margin-right: auto; }
 .protocol-print-root { padding: 24px; overflow: auto; background: #dfe3e6; color: #000; }
 .protocol-print-pages { display: grid; justify-items: center; gap: 24px; }
 .protocol-print-page-shell { width: min(1120px, 100%); }
 .protocol-print-page-label { margin: 0 0 6px; color: #434b51; font-size: 12px; font-weight: 750; }
-.protocol-print-page { width: 100%; aspect-ratio: 297 / 210; box-sizing: border-box; overflow: hidden; padding: 16px 18px; border: 1px solid #000; background: #fff; color: #000; box-shadow: 0 2px 10px rgba(0, 0, 0, .2); font: 12px/1.25 Arial, sans-serif; }
+.protocol-print-page { position: relative; width: 100%; aspect-ratio: 297 / 210; box-sizing: border-box; overflow: hidden; padding: 16px 18px; border: 1px solid #000; background: #fff; color: #000; box-shadow: 0 2px 10px rgba(0, 0, 0, .2); font: 12px/1.25 Arial, sans-serif; }
+.protocol-print-page-number { position: absolute; right: 4mm; bottom: 1mm; color: #000; font: 9px/1 Arial, sans-serif; white-space: nowrap; }
 .protocol-print-page h1 { margin: 0; padding: 7px 8px; border: 1px solid #000; font-size: 16px; text-align: center; }
 .protocol-print-meta { display: grid; grid-template-columns: 1fr .55fr 2.2fr 1.2fr; border-left: 1px solid #000; }
 .protocol-print-meta > div { min-width: 0; display: grid; grid-template-columns: auto 1fr; border-right: 1px solid #000; border-bottom: 1px solid #000; }
@@ -187,6 +229,10 @@
 .protocol-print-page .protocol-well-ladder { background: #ddd; }
 .protocol-print-page .protocol-well-pc { background: #ccc; }
 .protocol-print-page .protocol-well-nc { background: #eee; }
+.protocol-print-page > .protocol-calculation-columns { display: block; padding: 0; margin-top: 8px; }
+.protocol-print-page > .protocol-calculation-columns table { width: 100%; font-size: 10px; }
+.protocol-print-page > .protocol-calculation-columns td,
+.protocol-print-page > .protocol-calculation-columns th { padding: 3px 6px; border-color: #000; }
 .protocol-print-data-page { overflow: visible; }
 .protocol-print-data-page .protocol-print-meta { margin-bottom: 8px; }
 .protocol-print-data-page .protocol-dilution-heading { display: none; }
@@ -196,11 +242,16 @@
 .protocol-print-measure { position: fixed; top: 0; left: -400mm; visibility: hidden; pointer-events: none; }
 .protocol-print-dilutions-page { height: 196mm; aspect-ratio: auto; padding: 4mm; }
 .protocol-print-dilutions-page .protocol-dilution-wrap table { table-layout: fixed; }
+.protocol-print-dilutions-24 .protocol-dilution-wrap table { font-size: 12px; line-height: 1.2; }
+.protocol-print-dilutions-24 .protocol-dilution-wrap th,
+.protocol-print-dilutions-24 .protocol-dilution-wrap td { padding: 3px 4px; }
 .protocol-print-dilutions-page .protocol-dilution-section h2 { display: none; }
 .protocol-print-data-page .protocol-dilution-wrap th,
 .protocol-print-data-page .protocol-dilution-wrap td { padding: 2px 3px; text-align: center; overflow-wrap: anywhere; }
 .protocol-print-data-page .protocol-dilution-wrap .protocol-dilution-col-plate,
-.protocol-print-data-page .protocol-dilution-wrap .protocol-dilution-col-well { width: 1%; white-space: nowrap; }
+.protocol-print-data-page .protocol-dilution-wrap .protocol-dilution-col-well { white-space: nowrap; }
+.protocol-print-data-page .protocol-dilution-wrap .protocol-source-target-cell { padding: 0; }
+.protocol-print-data-page .protocol-rt-target { padding: 0 3px; border-color: #000; }
 .protocol-print-data-page .protocol-dilution-wrap tbody tr:nth-child(odd) td { background: #fff; }
 .protocol-print-data-page .protocol-dilution-wrap tbody tr:nth-child(even) td { background: #e6e6e6; }
 .protocol-print-data-page .protocol-calculation-columns { gap: 9px; padding: 0; }

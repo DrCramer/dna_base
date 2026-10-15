@@ -1,6 +1,8 @@
 import math
 from typing import Any
 
+from app.services.protocol_plate import count_active_electrophoresis_wells
+
 
 def _number(value: Any) -> float | None:
     if isinstance(value, (int, float)):
@@ -36,7 +38,7 @@ def calculate_pcr_reagents(sample_count: int, config: dict[str, Any]) -> dict[st
                 "key": key,
                 "label": label,
                 "per_reaction": per_reaction,
-                "total": round(1.1 * reactions * per_reaction, 1) if per_reaction is not None else None,
+                "total": round(1.1 * reactions * per_reaction, 1) if per_reaction is not None and key != "dna" else None,
             }
         )
     return {"sample_count": sample_count, "reaction_count": reactions, "overage_percent": 10, "components": components}
@@ -96,7 +98,7 @@ def calculate_electrophoresis_reagents(
                 "key": key,
                 "label": label,
                 "per_reaction": per_reaction,
-                "total": round(1.1 * reactions * per_reaction, 1) if per_reaction is not None else None,
+                "total": round(1.1 * reactions * per_reaction, 1) if per_reaction is not None and key != "pcr_products" else None,
             }
         )
     return {
@@ -107,6 +109,25 @@ def calculate_electrophoresis_reagents(
         "overage_percent": 10,
         "components": components,
     }
+
+
+def calculate_electrophoresis_plate_reagents(plates: list[dict[str, Any]], config: dict[str, Any], sequencer: str | None) -> list[dict[str, Any]]:
+    return [
+        {"plate_index": plate["plate_index"], **calculate_electrophoresis_reagents(count_active_electrophoresis_wells([plate]), config, sequencer)}
+        for plate in plates
+    ]
+
+
+def protocol_plate_calculations(snapshot: dict[str, Any]) -> dict[str, Any]:
+    calculations = snapshot.get("calculations") or {}
+    forez = calculations.get("electrophoresis_plates")
+    if forez is None:
+        # Старые документы: используем только сохранённые значения, не текущие справочники.
+        saved = calculations.get("electrophoresis") or {}
+        config = {item["key"]: item.get("per_reaction") for item in saved.get("components", [])}
+        plates = (snapshot.get("layouts") or {}).get("pcr", {}).get("plates", [])
+        forez = calculate_electrophoresis_plate_reagents(plates, config, f"G{saved.get('sequencer_capacity', 8)}")
+    return {"pcr": calculations.get("pcr", []), "electrophoresis_plates": forez}
 
 
 def calculate_dilution(
@@ -125,7 +146,7 @@ def calculate_dilution(
         "target_concentration": target_concentration,
         "total_factor": None,
         "steps": [],
-        "available": source_concentration is not None and target_concentration > 0,
+        "available": isinstance(source_concentration, (int, float)) and math.isfinite(source_concentration) and source_concentration > 0 and target_concentration > 0,
         "minimum_volume_available": True,
         "minimum_volume_warning": None,
     }

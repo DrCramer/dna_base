@@ -16,7 +16,7 @@ export function ProtocolPlate({ plate, title }: { plate: Plate; title: string })
           ...columns.map((column) => {
             const well = cells.get(`${row}${column}`)
             const snapshot = well?.object_snapshot || {}
-            const tooltip = [well?.well, well?.display_name, snapshot.party_no ? `Партия ${snapshot.party_no}` : null, snapshot.object_type].filter(Boolean).join('\n')
+            const tooltip = [well?.well, well?.display_name, snapshot.party_no ? `Партия ${snapshot.party_no}` : snapshot.examination_no ? `Экспертиза ${snapshot.examination_no}-${snapshot.examination_year}` : null, snapshot.description || snapshot.object_type].filter(Boolean).join('\n')
             return (
               <div
                 role="gridcell"
