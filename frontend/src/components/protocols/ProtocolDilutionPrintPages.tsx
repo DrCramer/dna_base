@@ -24,16 +24,18 @@ interface Props {
   protocolNo: number
   name: string
   note: string | null
+  targetConcentration?: number
   view: DilutionView
   precedingPageCount: number
   totalPageCount: number
   onPageCountChange: (count: number) => void
 }
 
-function DilutionPage({ rows, protocolDate, protocolNo, name, note, view, pageNumber, totalPageCount }: Omit<Props, 'precedingPageCount' | 'onPageCountChange' | 'totalPageCount'> & { pageNumber?: number; totalPageCount?: number }) {
+function DilutionPage({ rows, protocolDate, protocolNo, name, note, targetConcentration, view, pageNumber, totalPageCount }: Omit<Props, 'precedingPageCount' | 'onPageCountChange' | 'totalPageCount'> & { pageNumber?: number; totalPageCount?: number }) {
   return <article className={`protocol-print-page protocol-print-data-page protocol-print-dilutions-page${view.compactPages ? ' protocol-print-dilutions-24' : ''}`}>
     <h1>Разведения · {name || 'Протокол'}</h1>
     <div className="protocol-print-meta"><div><span>Дата</span><strong>{protocolDate}</strong></div><div><span>№</span><strong>{protocolNo}</strong></div><div className="protocol-print-name"><span>Название</span><strong>{name || '—'}</strong></div><div><span>Строк</span><strong>{rows.length}</strong></div></div>
+    {targetConcentration !== undefined ? <p className="protocol-print-target-concentration">Конечная концентрация ДНК (цель): <strong>{String(targetConcentration).replace('.', ',')}</strong> нг/мкл</p> : null}
     {note ? <p className="protocol-print-optimization-note">{note}</p> : null}
     <ProtocolDilutionsTable rows={rows} view={{ ...view, hideNoDilution: false, sortKey: null }} print />
     {pageNumber && totalPageCount ? <ProtocolPrintPageNumber page={pageNumber} total={totalPageCount} /> : null}
@@ -43,7 +45,7 @@ function DilutionPage({ rows, protocolDate, protocolNo, name, note, view, pageNu
 export function ProtocolDilutionPrintPages(props: Props) {
   const { rows, precedingPageCount, onPageCountChange } = props
   const measure = useRef<HTMLDivElement>(null)
-  const input = useMemo(() => ({ rows, protocolDate: props.protocolDate, protocolNo: props.protocolNo, name: props.name, note: props.note, view: props.view }), [rows, props.protocolDate, props.protocolNo, props.name, props.note, props.view])
+  const input = useMemo(() => ({ rows, protocolDate: props.protocolDate, protocolNo: props.protocolNo, name: props.name, note: props.note, targetConcentration: props.targetConcentration, view: props.view }), [rows, props.protocolDate, props.protocolNo, props.name, props.note, props.targetConcentration, props.view])
   const [layout, setLayout] = useState<{ input: typeof input; ends: number[] } | null>(null)
   const ends = layout?.input === input ? layout.ends : []
   useLayoutEffect(() => {

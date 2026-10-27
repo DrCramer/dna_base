@@ -176,6 +176,17 @@
 .protocol-dilution-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .protocol-dilution-options { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px 18px; }
 .protocol-water-optimization { padding: 0 14px 12px; }
+.protocol-target-concentration { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; max-width: 360px; padding: 8px 0; font-size: 12px; }
+.protocol-target-concentration > label { font-size: inherit; color: var(--text); font-weight: 650; }
+.protocol-target-value { display: inline-flex; align-items: center; gap: 6px; }
+.protocol-target-value input { width: 100px; min-width: 0; font-variant-numeric: tabular-nums; }
+.protocol-target-value input[aria-invalid=true] { border-color: var(--danger); }
+.protocol-target-error { flex-basis: 100%; color: var(--danger); }
+.protocol-target-pcr-note { margin-bottom: 8px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.protocol-dilution-status { display: block; margin-top: 3px; font-size: 10px; line-height: 1.2; white-space: normal; }
+@media (max-width: 640px) {
+  .protocol-target-concentration, .protocol-target-pcr-note { max-width: 300px; }
+}
 .protocol-water-summary { display: flex; flex-wrap: wrap; gap: 6px 20px; padding: 8px 0; font-size: 12px; border-bottom: 1px solid var(--border); }
 .protocol-water-review, .protocol-lab-notice { color: var(--muted); }
 .protocol-lab-notice { margin: 8px 12px; font-size: 12px; }
@@ -235,6 +246,7 @@
 .protocol-print-page > .protocol-calculation-columns th { padding: 3px 6px; border-color: #000; }
 .protocol-print-data-page { overflow: visible; }
 .protocol-print-data-page .protocol-print-meta { margin-bottom: 8px; }
+.protocol-print-target-concentration { margin: 0 0 6px; font-size: 10px; }
 .protocol-print-data-page .protocol-dilution-heading { display: none; }
 .protocol-print-data-page .protocol-dilution-wrap { overflow: visible; padding: 0; }
 .protocol-print-data-page .protocol-dilution-wrap table { width: 100%; font-size: 9px; table-layout: auto; }

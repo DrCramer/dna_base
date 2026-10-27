@@ -104,8 +104,59 @@ def test_protocol_api_exposes_print_calculations_without_replacing_saved_snapsho
 
 def test_dilution_is_not_required_below_target():
     result = calculate_dilution(0.05, target_concentration=0.1)
-    assert result["total_factor"] == 1
+    assert result["total_factor"] == 0.5
     assert result["steps"] == []
+    assert result["actual_final_concentration"] == 0.05
+    assert result["no_dilution_reason"] == "source_below_target"
+
+
+@pytest.mark.parametrize("source,target,factor,count", [(10, 0.1, 100, 1), (10, 1, 10, 1), (1000, 0.1, 10000, 2), (1000, 1, 1000, 2), (0.4, 1, 0.4, 0), (1, 1, 1, 0)])
+def test_custom_target_concentration_uses_existing_dilution_rules(source, target, factor, count):
+    result = calculate_dilution(source, target_concentration=target)
+    assert result["total_factor"] == factor
+    assert len(result["steps"]) == count
+    assert all(step["water_volume"] >= 0 for step in result["steps"])
+
+
+@pytest.mark.parametrize("kind", ["chs", "genetic_examination"])
+@pytest.mark.parametrize("dna_volume", [1, 15])
+@pytest.mark.asyncio
+async def test_target_changes_all_rows_but_never_pcr_recipe_layout_or_active_target(monkeypatch, kind, dna_volume):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from app.schemas.protocols import ProtocolPreviewRequest
+    from app.services import protocols
+
+    objects = [{"id": index, "source_kind": kind, "display_name": str(index), "rcsme_reg_no": str(index), "rt": {"small_quantity": small, "long_quantity": long, "y_quantity": y}} for index, (small, long, y) in enumerate([(10, 20, 5), (1000, 2000, 500), (0.4, 0.8, 0.2), (None, 5, 2)], 1)]
+    stages = [{"stage_type": stage, "enabled": True, "sequencer_name": None} for stage in protocols.STAGE_ORDER]
+    config = {"master_mix": 5, "h2o": 2, "dna": dna_volume}
+    original_config = copy.deepcopy(config)
+    monkeypatch.setattr(protocols, "protocol_object_snapshots", AsyncMock(return_value=objects))
+    monkeypatch.setattr(protocols, "genetic_object_snapshots", AsyncMock(return_value=objects))
+    monkeypatch.setattr(protocols, "_stage_snapshots", AsyncMock(return_value=(stages, {"pcr": SimpleNamespace(reagent_config_json=config)})))
+    payload = ProtocolPreviewRequest(kind=kind, examination_year=2026 if kind == "genetic_examination" else None, protocol_date="2026-10-27", protocol_no=1, name="Target", object_ids=[1, 2, 3, 4], dilution={"target_overrides": {f"{kind}:1": "long"}})
+    first = await protocols.build_protocol_snapshot(None, payload)
+    payload.dilution.target_concentration = 1
+    second = await protocols.build_protocol_snapshot(None, payload)
+    assert first["layouts"] == second["layouts"]
+    assert first["calculations"] == second["calculations"]
+    assert config == original_config
+    assert [row["total_factor"] for row in second["dilutions"]] == [20, 1000, 0.4, None]
+    assert second["dilutions"][0]["active_target"] == "long"
+    assert second["dilutions"][3]["available"] is False
+    assert all(row["target_concentration"] == 1 for row in second["dilutions"])
+    assert second["snapshot"]["dilution_settings"]["target_concentration"] == 1
+    for index in (0, 1):
+        assert sum(step["water_volume"] for step in second["dilutions"][index]["steps"]) < sum(step["water_volume"] for step in first["dilutions"][index]["steps"])
+        if len(first["dilutions"][index]["steps"]) == len(second["dilutions"][index]["steps"]):
+            assert all(new["water_volume"] < old["water_volume"] for old, new in zip(first["dilutions"][index]["steps"], second["dilutions"][index]["steps"]))
+    assert first["snapshot"]["dilution_settings"]["target_concentration"] == 0.1
+
+
+@pytest.mark.parametrize("value", [0, -1, float('nan'), float('inf')])
+def test_target_validation_rejects_nonpositive_and_nonfinite_values(value):
+    with pytest.raises(ValueError):
+        ProtocolDilutionSettings(target_concentration=value)
 
 
 def test_single_dilution():

@@ -59,6 +59,12 @@ def build_protocol_workbook(snapshot: dict[str, Any]) -> bytes:
         for cell in row:
             cell.border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
             cell.alignment = Alignment(vertical="top", wrap_text=True)
+    target_row = overview.max_row + 1
+    overview.append(["Конечная концентрация ДНК (цель), нг/мкл", *[None] * 6, (snapshot.get("dilution_settings") or {}).get("target_concentration", 0.1)])
+    overview.merge_cells(start_row=target_row, start_column=1, end_row=target_row, end_column=7)
+    for cell in overview[target_row]:
+        cell.border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+        cell.alignment = Alignment(vertical="center", wrap_text=True)
     for key, title in (("source", "Исходная плашка"), ("pcr", "PCR")):
         for plate in snapshot["layouts"].get(key, {}).get("plates", []):
             _plate_sheet(workbook, f"{title} {plate['plate_index']}", plate)
@@ -83,12 +89,22 @@ def build_protocol_workbook(snapshot: dict[str, Any]) -> bytes:
         dilution_headers += ["Мишень", "Long", "Small", "Y", "Источник RT"]
     if optimization.get("enabled"):
         dilution_headers += ["Фактическая конц.", "Отклонение, %", "Базовая ДНК I", "Базовая H₂O I", "Базовая ДНК II", "Базовая H₂O II", "Базовая факт. конц.", "Статус округления", "Причина / примечание", "Остаток I разведения"]
+    dilution_headers += ["Примечание"]
     dilution.append(dilution_headers)
     for item in snapshot.get("dilutions", []):
         steps = item.get("steps", [])
         first = steps[0] if steps else {}
         second = steps[1] if len(steps) > 1 else {}
-        values = [item.get("plate_index"), item.get("well"), item.get("display_name"), item.get("source_concentration"), item.get("target_concentration"), item.get("total_factor"), first.get("factor"), first.get("dna_volume"), first.get("water_volume"), second.get("factor"), second.get("dna_volume"), second.get("water_volume")]
+        final_concentration = item.get("target_concentration")
+        note = None
+        if item.get("available") is False:
+            final_concentration = None
+        elif item.get("available") and not steps:
+            final_concentration = item.get("source_concentration")
+            note = "Без разведения"
+            if final_concentration is not None and final_concentration < item["target_concentration"]:
+                note += f": исходная концентрация ниже цели {item['target_concentration']:g} нг/мкл"
+        values = [item.get("plate_index"), item.get("well"), item.get("display_name"), item.get("source_concentration"), final_concentration, item.get("total_factor"), first.get("factor"), first.get("dna_volume"), first.get("water_volume"), second.get("factor"), second.get("dna_volume"), second.get("water_volume")]
         if show_targets:
             targets = item.get("rt_targets") or {}
             rt = rt_by_object.get(item.get("object_id"), {})
@@ -100,7 +116,7 @@ def build_protocol_workbook(snapshot: dict[str, Any]) -> bytes:
             base_two = baseline[1] if len(baseline) > 1 else {}
             status = {"optimized": "Оптимизировано", "unchanged": "Исходный расчёт", "blocked": "Требует проверки"}.get(metadata.get("status"))
             values += [metadata.get("actual_final_concentration"), metadata.get("relative_error_percent"), base_one.get("dna_volume"), base_one.get("water_volume"), base_two.get("dna_volume"), base_two.get("water_volume"), metadata.get("baseline_actual_final_concentration"), status, metadata.get("reason"), metadata.get("first_dilution_remaining_volume")]
-        dilution.append(values)
+        dilution.append([*values, note])
     for cell in dilution[1]:
         cell.font = Font(bold=True)
         cell.fill = PatternFill("solid", fgColor="D9EAF7")

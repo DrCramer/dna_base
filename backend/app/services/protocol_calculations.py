@@ -146,15 +146,20 @@ def calculate_dilution(
         "target_concentration": target_concentration,
         "total_factor": None,
         "steps": [],
-        "available": isinstance(source_concentration, (int, float)) and math.isfinite(source_concentration) and source_concentration > 0 and target_concentration > 0,
+        "available": isinstance(source_concentration, (int, float)) and math.isfinite(source_concentration) and source_concentration > 0 and isinstance(target_concentration, (int, float)) and math.isfinite(target_concentration) and target_concentration > 0,
         "minimum_volume_available": True,
         "minimum_volume_warning": None,
     }
     if not result["available"]:
         return result
-    factor = max(1.0, float(source_concentration) / target_concentration)
+    factor = float(source_concentration) / target_concentration
+    if not math.isfinite(factor):
+        result["available"] = False
+        return result
     result["total_factor"] = round(factor, 4)
     if factor <= 1:
+        result["actual_final_concentration"] = float(source_concentration)
+        result["no_dilution_reason"] = "source_below_target" if factor < 1 else "at_target"
         return result
     if factor <= threshold:
         steps = [

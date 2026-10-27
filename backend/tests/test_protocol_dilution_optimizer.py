@@ -28,6 +28,27 @@ def row(source, index=1, **kwargs):
     return {"object_id": index, "display_name": f"ии{index}", "plate_index": 1 + index // 88, "well": "B2", **calculate_dilution(source, **kwargs)}
 
 
+@pytest.mark.parametrize("target", [0.2, 0.5, 1, 1.5])
+def test_optimizer_checks_the_changed_target_and_preserves_minimum_and_source_limits(target):
+    rows = [row(source, index, target_concentration=target, minimum_final_volume_enabled=True) for index, source in enumerate([10, 1000, 0.4], 1)]
+    policy = settings(target_concentration=target, minimum_final_volume_enabled=True)
+    optimized, summary = optimize_dilution_water_batches(rows, policy)
+    assert summary["enabled"]
+    for item in optimized:
+        assert item["target_concentration"] == target
+        if not item["steps"]:
+            assert item["source_concentration"] <= target
+            continue
+        metadata = item["optimization"]
+        actual = calculate_actual_dilution_concentration(item["source_concentration"], item["steps"])
+        assert metadata["target_concentration"] == target
+        assert metadata["actual_final_concentration"] == pytest.approx(actual)
+        if not metadata["needs_review"]:
+            assert abs(100 * (actual / target - 1)) <= 5 + 1e-9
+            assert item["steps"][0]["dna_volume"] <= 50
+            assert all(step["dna_volume"] + step["water_volume"] >= 15 for step in item["steps"])
+
+
 @pytest.mark.parametrize("factor,water,accepted,expected_error", [
     (82.72, 250, True, -1.91), (43.96, 130, True, -0.84),
     (22.47, 70, False, -7.66), (37.38, 100, False, 8.87),

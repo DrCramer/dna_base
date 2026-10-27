@@ -77,6 +77,18 @@ export function formatRtConcentration(value: unknown) {
   return typeof value === 'number' ? Number.isFinite(value) ? String(Number(value.toFixed(4))) : '—' : formatProtocolValue(value)
 }
 
+export function dilutionFinalConcentration(row: DilutionRow) {
+  if (row.available === false) return null
+  return row.available && !row.steps?.length ? row.source_concentration : row.target_concentration
+}
+
+export function dilutionStatus(row: DilutionRow) {
+  if (!row.available || row.steps?.length) return null
+  return typeof row.source_concentration === 'number' && typeof row.target_concentration === 'number' && row.source_concentration < row.target_concentration
+    ? `Без разведения: исходная концентрация ниже цели ${formatProtocolValue(row.target_concentration)} нг/мкл`
+    : 'Без разведения'
+}
+
 export function formatDilutionVolume(value: unknown) {
   return typeof value === 'number'
     ? new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 }).format(value)
@@ -202,8 +214,8 @@ export function ProtocolDilutionsTable({ rows, view, onHideNoDilution, onSort, o
           <tr>{splitSource ? <><th data-source-part="target">Мишень</th><th data-source-part="quantity">Конц.</th></> : null}<th>ДНК</th><th>H₂O</th><th>ДНК</th><th>H₂O</th></tr>
         </thead>
         <tbody>{shown.map((item) => <tr key={item.object_id}>
-          {optionalCell('plate', item.plate_index)}{optionalCell('well', item.well)}<td className="protocol-dilution-object">{formatProtocolValue(item.display_name)}{item.minimum_volume_available === false && item.minimum_volume_warning ? <span className="protocol-dilution-warning" role="img" aria-label={item.minimum_volume_warning} title={item.minimum_volume_warning}><AlertTriangle size={14} aria-hidden="true" /></span> : null}{item.optimization?.needs_review ? <span className="protocol-dilution-warning" title={item.optimization.reason || 'Требует проверки'}><AlertTriangle size={14} aria-hidden="true" /><span className="protocol-dilution-review-label">Требует проверки</span></span> : null}</td>
-          {sourceCells(item)}{optionalCell('target', item.target_concentration)}{optionalCell('factor', item.total_factor)}
+          {optionalCell('plate', item.plate_index)}{optionalCell('well', item.well)}<td className="protocol-dilution-object">{formatProtocolValue(item.display_name)}{dilutionStatus(item) ? <small className="protocol-dilution-status">{dilutionStatus(item)}</small> : null}{item.minimum_volume_available === false && item.minimum_volume_warning ? <span className="protocol-dilution-warning" role="img" aria-label={item.minimum_volume_warning} title={item.minimum_volume_warning}><AlertTriangle size={14} aria-hidden="true" /></span> : null}{item.optimization?.needs_review ? <span className="protocol-dilution-warning" title={item.optimization.reason || 'Требует проверки'}><AlertTriangle size={14} aria-hidden="true" /><span className="protocol-dilution-review-label">Требует проверки</span></span> : null}</td>
+          {sourceCells(item)}{optionalCell('target', dilutionFinalConcentration(item))}{optionalCell('factor', item.total_factor)}
           <td>{formatDilutionVolume(item.steps?.[0]?.dna_volume)}</td><td title={dilutionWaterTooltip(item, 0)} className={item.optimization?.status === 'optimized' ? 'protocol-water-optimized' : undefined}>{formatDilutionVolume(item.steps?.[0]?.water_volume)}</td>
           <td>{formatDilutionVolume(item.steps?.[1]?.dna_volume)}</td><td title={dilutionWaterTooltip(item, 1)} className={item.optimization?.status === 'optimized' ? 'protocol-water-optimized' : undefined}>{formatDilutionVolume(item.steps?.[1]?.water_volume)}</td>
         </tr>)}</tbody>

@@ -1,7 +1,7 @@
 import { useLayoutEffect, useMemo, useState } from 'react'
 import type { Employee, ProtocolDilutionSettings, ProtocolPlateRules, ProtocolPreview, ProtocolStageSettings, ProtocolStageType } from '../../api/types'
 import { ProtocolPlate } from './ProtocolPlate'
-import { protocolDilutionTolerance } from './ProtocolDilutionOptions'
+import { defaultProtocolDilution, protocolDilutionTolerance } from './ProtocolDilutionOptions'
 import { ProtocolDilutionPrintPages } from './ProtocolDilutionPrintPages'
 import { ProtocolPrintPageNumber } from './ProtocolPrintPageNumber'
 import {
@@ -105,7 +105,7 @@ export function ProtocolPrintDocument({ protocolDate, protocolNo, name, stages, 
           </div>
         )
       })}
-      <ProtocolDilutionPrintPages rows={dilutions} protocolDate={displayDate(protocolDate)} protocolNo={protocolNo} name={name} view={dilutionView} precedingPageCount={pages.length} totalPageCount={totalPageCount} onPageCountChange={setDilutionPageCount} note={preview.dilution_optimization?.enabled ? `Округление объема H₂O · допуск: ${protocolDilutionTolerance(savedDilutionSettings)}. Отмеченные строки требуют решения сотрудника.` : null} />
+      <ProtocolDilutionPrintPages rows={dilutions} protocolDate={displayDate(protocolDate)} protocolNo={protocolNo} name={name} view={dilutionView} targetConcentration={savedDilutionSettings?.target_concentration ?? defaultProtocolDilution.target_concentration} precedingPageCount={pages.length} totalPageCount={totalPageCount} onPageCountChange={setDilutionPageCount} note={preview.dilution_optimization?.enabled ? `Округление объема H₂O · допуск: ${protocolDilutionTolerance(savedDilutionSettings)}. Отмеченные строки требуют решения сотрудника.` : null} />
     </div>
   )
 }

@@ -1,6 +1,6 @@
 import type { ProtocolDilutionSettings, ProtocolPipettingConstraints, ProtocolPreview } from '../../api/types'
-import { useEffect, useState } from 'react'
-import { formatProtocolValue, ProtocolDilutionAuditTable } from './ProtocolSupplementTables'
+import { useEffect, useId, useState } from 'react'
+import { formatProtocolValue, ProtocolDilutionAuditTable, protocolReagentRows } from './ProtocolSupplementTables'
 
 export const defaultProtocolDilution: ProtocolDilutionSettings = {
   enabled: true, target_concentration: 0.1, source_dna_volume: 3,
@@ -18,6 +18,36 @@ const instrumentFields: Array<[keyof ProtocolPipettingConstraints, string]> = [
 
 function number(value: number) {
   return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(value)
+}
+
+export function parseTargetConcentration(text: string): number | null {
+  const normalized = text.trim().replace(',', '.')
+  if (!/^\+?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(normalized)) return null
+  const value = Number(normalized)
+  return Number.isFinite(value) && value > 0 ? value : null
+}
+
+function TargetConcentrationInput({ value, readOnly, onChange }: { value: number; readOnly?: boolean; onChange: (value: number) => void }) {
+  const id = useId()
+  const [text, setText] = useState(String(value).replace('.', ','))
+  const [invalid, setInvalid] = useState(false)
+  useEffect(() => { setText(String(value).replace('.', ',')); setInvalid(false) }, [value])
+  function commit() {
+    const next = parseTargetConcentration(text)
+    setInvalid(next === null)
+    if (next !== null) {
+      setText(String(next).replace('.', ','))
+      if (next !== value) onChange(next)
+    }
+  }
+  return <div className="protocol-target-concentration">
+    <label htmlFor={id}>Конечная концентрация ДНК</label>
+    <div className="protocol-target-value"><input id={id} type="text" inputMode="decimal" value={text} disabled={readOnly} aria-invalid={invalid} aria-describedby={invalid ? `${id}-error` : undefined} onChange={(event) => { setText(event.target.value); setInvalid(false) }} onBlur={commit} onKeyDown={(event) => {
+      if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() }
+      if (event.key === 'Escape') { event.preventDefault(); setText(String(value).replace('.', ',')); setInvalid(false) }
+    }} /><span>нг/мкл</span></div>
+    {invalid ? <span id={`${id}-error`} className="protocol-target-error" role="alert">Введите конечное положительное число. Для расчёта сохранено {String(value).replace('.', ',')} нг/мкл.</span> : null}
+  </div>
 }
 
 function SettingNumberInput({ value, disabled, required = false, positive = false, maximum, step = 'any', onValue }: {
@@ -54,8 +84,13 @@ export function ProtocolDilutionOptions({ settings, preview, readOnly, onChange 
   onChange: (patch: Partial<ProtocolDilutionSettings>) => void
 }) {
   const summary = preview.dilution_optimization
-  if (!settings.optimize_water_volumes) return null
+  const dna = protocolReagentRows(preview, 'pcr').find((component) => component.key === 'dna')?.per_reaction
+  const dnaVolume = typeof dna === 'number' && Number.isFinite(dna) && dna > 0 ? dna : null
+  const mass = dnaVolume === null ? null : settings.target_concentration * dnaVolume
   return <div className="protocol-water-optimization">
+    <TargetConcentrationInput value={settings.target_concentration} readOnly={readOnly} onChange={(target_concentration) => onChange({ target_concentration })} />
+    {dnaVolume !== null ? <div className="protocol-target-pcr-note">PCR-набор: {String(dnaVolume).replace('.', ',')} мкл ДНК на реакцию.{mass !== null && Number.isFinite(mass) ? <> При целевой концентрации {String(settings.target_concentration).replace('.', ',')} нг/мкл расчётная масса ≈ {new Intl.NumberFormat('ru-RU', { maximumSignificantDigits: 6 }).format(mass)} нг/реакцию.</> : null}</div> : null}
+    {settings.optimize_water_volumes ? <>
     {summary?.enabled ? <div className="protocol-water-summary" role="status">
       <span>Вариантов объёма воды: <strong>{summary.unique_water_volumes_before} → {summary.unique_water_volumes_after}</strong></span>
       <span>Оптимизировано: <strong>{summary.optimized_object_count} из {summary.object_count} объектов</strong></span>
@@ -78,13 +113,13 @@ export function ProtocolDilutionOptions({ settings, preview, readOnly, onChange 
       </div></details>
     </details>
     {summary?.enabled ? <>
-      <details className="protocol-water-batches"><summary>Группы объёмов воды</summary><div className="protocol-water-stage-groups">
+      <details className="protocol-rounding-details"><summary>Подробности округления</summary><ProtocolDilutionAuditTable rows={preview.dilutions} /><div className="protocol-water-stage-groups">
         {([['I разведение', summary.batch_groups_first], ['II разведение', summary.batch_groups_second]] as const).map(([title, groups]) => <section key={title}><h4>{title}</h4>{groups.length ? groups.map((group) => <details key={group.water_volume}>
           <summary>{number(group.water_volume)} мкл — {group.object_count} объектов{group.objects.some((item) => item.needs_review) ? ' · есть требующие проверки' : ''}</summary>
           <table><thead><tr><th>Плашка</th><th>Лунка</th><th>Объект</th><th /></tr></thead><tbody>{group.objects.map((item) => <tr key={`${item.object_id}-${item.plate_index}-${item.well}`}><td>{formatProtocolValue(item.plate_index)}</td><td>{formatProtocolValue(item.well)}</td><td>{formatProtocolValue(item.display_name)}</td><td>{item.needs_review ? 'Требует проверки' : ''}</td></tr>)}</tbody></table>
         </details>) : <span className="muted">Нет выполняемых шагов</span>}</section>)}
       </div></details>
-      <details><summary>Подробности округления</summary><ProtocolDilutionAuditTable rows={preview.dilutions} /></details>
+    </> : null}
     </> : null}
   </div>
 }

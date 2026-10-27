@@ -5,6 +5,17 @@ import { protocolNumbers, protocolObjectIds, selectionCaption } from '../../src/
 import { protocolPrintPageCount } from '../../src/components/protocols/ProtocolPrintDocument'
 import { paginateDilutionRowHeights } from '../../src/components/protocols/ProtocolDilutionPrintPages'
 import { formatRtConcentration, protocolReagentRows } from '../../src/components/protocols/ProtocolSupplementTables'
+import { parseTargetConcentration } from '../../src/components/protocols/ProtocolDilutionOptions'
+import { dilutionFinalConcentration, dilutionStatus } from '../../src/components/protocols/ProtocolSupplementTables'
+
+test('целевая концентрация принимает запятую и не принимает пустые и нечисловые значения', () => {
+  for (const [text, value] of [['0,1', 0.1], ['1', 1], ['1,5', 1.5], ['1.5', 1.5], ['0,2', 0.2], ['0.5', 0.5]] as const) expect(parseTargetConcentration(text)).toBe(value)
+  for (const text of ['', ' ', '0', '-1', 'NaN', 'Infinity', '1e999', '.', ',', '1,2,3', '0x10']) expect(parseTargetConcentration(text)).toBeNull()
+  const row = { object_id: 1, available: true, source_concentration: 0.4, target_concentration: 1, steps: [] }
+  expect(dilutionFinalConcentration(row)).toBe(0.4)
+  expect(dilutionStatus(row)).toContain('ниже цели 1')
+  expect(dilutionFinalConcentration({ ...row, available: false })).toBeNull()
+})
 
 test('концентрации отображаются до четырёх знаков, включая старые snapshot', () => {
   expect(formatRtConcentration(0.81234567)).toBe('0.8123')
@@ -671,7 +682,7 @@ test('удобные объёмы воды сохраняют лунки, нас
   await page.locator('.protocol-sheet .protocol-dilution-sort').first().click()
   await expect(dilutionRows.first()).toContainText('3006-1')
   expect((await first.locator('td').allTextContents()).slice(0, 3)).toEqual(coordinates.slice(0, 3))
-  await page.getByText('Группы объёмов воды', { exact: true }).click()
+  await page.getByText('Подробности округления', { exact: true }).click()
   await expect(page.getByText('65 мкл — 5 объектов', { exact: true })).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('water-desktop.png'), fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })

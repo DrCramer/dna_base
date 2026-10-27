@@ -1,0 +1,157 @@
+import { expect, test } from '@playwright/test'
+import type { Protocol, ProtocolPayload, ProtocolPreview } from '../../src/api/types'
+
+for (const kind of ['chs', 'genetic_examination'] as const) {
+  test(`${kind}: цель разведения, валидация, рецептура, snapshot и печать`, async ({ page }, testInfo) => {
+    test.skip(process.env.DNA_E2E_ISOLATED !== '1', 'Требуется изолированная БД и create_protocol_concentration_e2e.py')
+    test.setTimeout(90_000)
+    const names = Array.from({ length: 4 }, (_, index) => `${990010 + index}-1`)
+    const requests: ProtocolPayload[] = []
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && request.url().endsWith('/protocols/preview')) requests.push(request.postDataJSON() as ProtocolPayload)
+    })
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Войти' }).click()
+    await expect(page.getByText('ДНК реестр', { exact: true })).toBeVisible()
+    if (kind === 'genetic_examination') {
+      const created = await page.request.post('/api/protocols/genetic-examinations/numbers/apply', { data: { examination_year: 2026, items: names.map((raw_name) => ({ raw_name })) } })
+      expect(created.ok()).toBe(true)
+      const ids = (await created.json()).object_ids as number[]
+      const csv = ['Sample Name,Target Name,Quantity,Ct', ...names.flatMap((name, index) => {
+        const small = [10, 1000, 0.4, null][index]
+        return [`${name},Long,${small === null ? 5 : small * 2},25`, ...(small === null ? [] : [`${name},Small,${small},25`]), `${name},Y,${small === null ? 2 : small / 2},25`]
+      })].join('\n')
+      const uploaded = await page.request.post('/api/protocols/genetic-examinations/rt/preview', { multipart: { examination_year: '2026', object_ids: ids.join(','), files: { name: 'target-concentration.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) } } })
+      expect(uploaded.ok()).toBe(true)
+      const files = (await uploaded.json()).files as Array<{ upload_id: string }>
+      const committed = await page.request.post('/api/protocols/genetic-examinations/rt/commit', { data: { examination_year: 2026, object_ids: ids, upload_ids: files.map((file) => file.upload_id), confirm_duplicate: true } })
+      expect(committed.ok()).toBe(true)
+    }
+    await page.getByRole('button', { name: 'Протоколы', exact: true }).click()
+    await page.getByRole('button', { name: 'Создать', exact: true }).click()
+    if (kind === 'genetic_examination') {
+      await page.getByRole('tab', { name: 'Генетические экспертизы' }).click()
+      await page.getByRole('button', { name: 'Вставить список номеров', exact: true }).click()
+      await page.getByLabel('Номера объектов экспертиз').fill(names.join('\n'))
+      await page.getByRole('button', { name: 'Проверить', exact: true }).click()
+      await page.getByRole('button', { name: 'Добавить к текущему', exact: true }).click()
+    } else {
+      await page.getByRole('button', { name: 'Партии протокола' }).click()
+      await page.locator('.multi-party-modal input[type=checkbox]').first().check()
+      await page.getByRole('button', { name: 'Готово', exact: true }).click()
+    }
+    await expect(page.getByRole('button', { name: 'Предпросмотр печати', exact: true })).toBeEnabled()
+    await page.getByText('Разведения', { exact: true }).click()
+    const field = page.getByLabel('Конечная концентрация ДНК', { exact: true })
+    await expect(field).toHaveValue('0,1')
+    await expect(page.getByLabel('Округление объема H₂O')).not.toBeChecked()
+    await expect(page.getByText('Группы объёмов воды', { exact: true })).toHaveCount(0)
+    await expect(page.locator('.protocol-target-pcr-note')).toHaveCount(0)
+    const dna = kind === 'chs' ? 1 : 15
+    await page.locator('.protocol-stage').nth(2).getByLabel('Набор').selectOption({ label: `Тест: DNA ${dna}` })
+    await expect(page.locator('.protocol-target-pcr-note')).toContainText(`PCR-набор: ${dna} мкл ДНК`)
+    await expect(page.getByRole('button', { name: 'Предпросмотр печати', exact: true })).toBeEnabled()
+    const before = requests.length
+    const changed = page.waitForResponse((response) => response.url().endsWith('/protocols/preview') && response.request().postDataJSON().dilution.target_concentration === 1)
+    await field.fill('1')
+    await page.waitForTimeout(500)
+    expect(requests).toHaveLength(before)
+    await field.press('Enter')
+    const one = await (await changed).json() as ProtocolPreview
+    expect(one.dilutions.map((row) => row.total_factor)).toEqual([10, 1000, 0.4, null])
+    expect(one.dilutions[0].steps).toEqual([{ factor: 10, dna_volume: 3, water_volume: 27 }])
+    expect(one.dilutions[1].steps).toHaveLength(2)
+    expect(one.dilutions[3].available).toBe(false)
+    await expect(page.locator('.protocol-target-pcr-note')).toContainText(`≈ ${dna} нг/реакцию`)
+    const invalidRequests = requests.length
+    for (const text of ['0', '-1', '', 'NaN', 'Infinity', '1e999']) {
+      await field.fill(text)
+      await field.press('Tab')
+      await expect(page.locator('.protocol-target-error')).toBeVisible()
+      await page.waitForTimeout(400)
+      expect(requests).toHaveLength(invalidRequests)
+    }
+    await field.fill('1')
+    await field.press('Tab')
+    await page.getByLabel('Все мишени', { exact: true }).check()
+    await page.getByLabel(`Y для ${names[0]}`, { exact: true }).click()
+    await expect(page.getByLabel(`Y для ${names[0]}`, { exact: true })).toBeChecked()
+    await page.getByLabel('Минимальный объём 15 мкл').check()
+    await page.getByLabel('Округление объема H₂O').check()
+    await expect(page.getByRole('button', { name: 'Предпросмотр печати', exact: true })).toBeEnabled()
+    await page.getByLabel('Скрыть объекты без разведения').check()
+    await page.locator('.protocol-sheet .protocol-dilution-sort').first().click()
+    const nextResponse = page.waitForResponse((response) => response.url().endsWith('/protocols/preview') && response.request().postDataJSON().dilution.target_concentration === 1.5)
+    await field.fill('1,5')
+    await field.press('Enter')
+    const next = await (await nextResponse).json() as ProtocolPreview
+    expect(next.dilutions).toHaveLength(4)
+    expect(next.dilutions.every((row) => row.target_concentration === 1.5)).toBe(true)
+    expect(next.dilutions[0].active_target).toBe('y')
+    expect(next.dilutions[0].source_concentration).toBe(5)
+    expect(next.layouts).toEqual(one.layouts)
+    expect(next.calculations).toEqual(one.calculations)
+    for (const label of ['Скрыть объекты без разведения', 'Все мишени', 'Минимальный объём 15 мкл', 'Округление объема H₂O']) await expect(page.getByLabel(label, { exact: true })).toBeChecked()
+    expect(await page.locator('.protocol-sheet .protocol-dilution-sort').first().locator('svg').evaluate((icon) => icon.classList.contains('lucide-arrow-up'))).toBe(true)
+    await page.getByLabel('Скрыть объекты без разведения').uncheck()
+    const lowRow = page.locator('.protocol-sheet .protocol-dilution-wrap tbody tr').filter({ hasText: names[2] })
+    await expect(lowRow.locator('td[data-column=target]')).toHaveText('0.4')
+    await expect(lowRow).toContainText('ниже цели 1.5')
+    await page.setViewportSize({ width: 390, height: 844 })
+    await field.scrollIntoViewIfNeeded()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    const valueBox = (await page.locator('.protocol-target-value').boundingBox())!
+    const sheetBox = (await page.locator('.protocol-sheet-wrap').boundingBox())!
+    expect(valueBox.x).toBeGreaterThanOrEqual(sheetBox.x)
+    expect(valueBox.x + valueBox.width).toBeLessThanOrEqual(sheetBox.x + sheetBox.width)
+    await page.screenshot({ path: testInfo.outputPath('target-mobile.png') })
+    await page.setViewportSize({ width: 1280, height: 900 })
+    const saveResponse = page.waitForResponse((response) => response.url().endsWith('/api/protocols') && response.request().method() === 'POST')
+    await page.getByRole('button', { name: 'Сохранить черновик', exact: true }).click()
+    const saved = await (await saveResponse).json() as Protocol
+    expect((saved.snapshot.dilution_settings as { target_concentration: number }).target_concentration).toBe(1.5)
+    await page.reload()
+    await page.getByText('Разведения', { exact: true }).click()
+    await expect(field).toHaveValue('1,5')
+    await page.getByRole('button', { name: 'Сохранён', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'Редактировать протокол', exact: true })).toBeVisible()
+    await page.reload()
+    await page.getByText('Разведения', { exact: true }).click()
+    await expect(field).toHaveValue('1,5')
+    await expect(field).toBeDisabled()
+    const finalRequests = requests.length
+    await page.waitForTimeout(500)
+    expect(requests).toHaveLength(finalRequests)
+    await page.getByRole('button', { name: 'Предпросмотр печати', exact: true }).click()
+    const printSelection = page.getByRole('dialog', { name: 'Что печатать', exact: true })
+    for (const stage of ['Выделение', 'RT', 'PCR', 'Форез']) await printSelection.getByLabel(stage, { exact: true }).uncheck()
+    await printSelection.getByRole('button', { name: 'Предпросмотр', exact: true }).click()
+    const printed = page.locator('.protocol-print-root .protocol-dilution-wrap')
+    await expect(page.locator('.protocol-print-target-concentration')).toContainText('1,5')
+    await expect(printed.locator('tbody tr')).toHaveCount(4)
+    await expect(printed.locator('tbody tr').filter({ hasText: names[2] }).locator('td[data-column=target]')).toHaveText('0.4')
+    await expect(printed.locator('tbody tr').filter({ hasText: names[2] })).toContainText('ниже цели 1.5')
+    await expect(printed.locator('tbody tr').filter({ hasText: names[3] }).locator('td[data-column=target]')).toHaveText('—')
+    await page.emulateMedia({ media: 'print' })
+    await page.evaluate(() => document.body.classList.add('protocol-printing'))
+    await page.pdf({ path: testInfo.outputPath('target.pdf'), preferCSSPageSize: true, printBackground: true })
+    await page.evaluate(() => document.body.classList.remove('protocol-printing'))
+    await page.emulateMedia({ media: 'screen' })
+    await page.getByRole('button', { name: 'Закрыть', exact: true }).click()
+    await page.getByRole('button', { name: 'Редактировать протокол', exact: true }).click()
+    await expect(page.getByRole('heading', { name: /версия 2$/ })).toBeVisible()
+    if (await field.count() === 0) await page.getByText('Разведения', { exact: true }).click()
+    await expect(field).toBeEnabled()
+    await expect(field).toHaveValue('1,5')
+    await field.fill('1')
+    await field.press('Enter')
+    await expect(page.getByRole('button', { name: 'Предпросмотр печати', exact: true })).toBeEnabled()
+    const patchResponse = page.waitForResponse((response) => response.request().method() === 'PATCH' && /\/api\/protocols\/\d+$/.test(response.url()))
+    await page.getByRole('button', { name: 'Сохранить черновик', exact: true }).click()
+    const revised = await (await patchResponse).json() as Protocol
+    expect(revised.revision_no).toBe(2)
+    expect((revised.snapshot.dilution_settings as { target_concentration: number }).target_concentration).toBe(1)
+    const original = await page.request.get(`/api/protocols/${saved.id}`)
+    expect((await original.json()).snapshot).toEqual(saved.snapshot)
+  })
+}

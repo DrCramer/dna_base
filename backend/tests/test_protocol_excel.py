@@ -5,6 +5,7 @@ from openpyxl import load_workbook
 
 from app.services.protocol_excel import build_protocol_workbook
 from app.services.protocol_plate import build_protocol_layouts
+from app.services.protocol_calculations import calculate_dilution
 
 
 def test_protocol_excel_keeps_snapshot_order_and_multiple_pcr_plates():
@@ -54,4 +55,18 @@ def test_excel_omits_legacy_sample_totals_without_changing_snapshot():
         ("PCR", 1, "Master mix", 5, 16.5), ("PCR", 1, "DNA", 1, None),
         ("Форез", None, "ILS", 0.5, 4.4), ("Форез", None, "PCR-продукты", 1, None),
     ]
+    assert snapshot == original
+
+
+def test_excel_does_not_claim_an_unreachable_target_or_missing_concentration():
+    objects = [{"id": index, "rcsme_reg_no": str(index)} for index in range(1, 4)]
+    snapshot = {"protocol": {"protocol_date": "2026-10-27", "protocol_no": 1, "name": "Target"}, "objects": objects, "stages": [], "layouts": build_protocol_layouts(objects), "calculations": {"pcr": [], "electrophoresis": {"components": []}}, "dilutions": [{"object_id": index, **calculate_dilution(source, target_concentration=1)} for index, source in enumerate([0.4, None, 10], 1)]}
+    snapshot["dilution_settings"] = {"target_concentration": 1}
+    original = copy.deepcopy(snapshot)
+    workbook = load_workbook(BytesIO(build_protocol_workbook(snapshot)), data_only=True)
+    sheet = workbook["Dilution"]
+    assert workbook["Единая_плашка_A4"]["H7"].value == 1
+    assert [sheet[f"E{row}"].value for row in (2, 3, 4)] == [0.4, None, 1]
+    assert "ниже цели 1" in sheet["M2"].value
+    assert sheet["H2"].value is None and sheet["I2"].value is None
     assert snapshot == original
