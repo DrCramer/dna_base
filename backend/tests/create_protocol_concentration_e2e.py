@@ -14,8 +14,12 @@ async def main():
     if not (make_url(get_settings().database_url).database or "").startswith("dna_genetic_test_"):
         raise RuntimeError("Запуск допускается только в изолированной тестовой БД")
     async with SessionLocal() as session:
+        profiles = list((await session.execute(select(ProtocolStageProfile).where(ProtocolStageProfile.name.in_(["Тест: DNA 1", "Тест: DNA 15"])))).scalars())
+        for profile in profiles:
+            profile.instrument_config_json = {**profile.instrument_config_json, "_isolated_protocol_e2e": True}
         party = (await session.execute(select(Party).where(Party.party_no == "9900", Party.case_year == date.today().year))).scalar_one_or_none()
         if party:
+            await session.commit()
             return
         party = Party(party_no="9900", case_year=date.today().year, object_count=4)
         session.add(party)
@@ -29,7 +33,7 @@ async def main():
             await session.flush()
             session.add(RealtimeDetail(stage_event_id=event.id, small_quantity=quantity, long_quantity=quantity * 2 if quantity else 5, y_quantity=quantity / 2 if quantity else 2))
         for dna in (1, 15):
-            session.add(ProtocolStageProfile(stage_type="pcr", name=f"Тест: DNA {dna}", reagent_config_json={"master_mix": 5, "h2o": 2, "dna": dna}, plate_rules_json={}, instrument_config_json={}))
+            session.add(ProtocolStageProfile(stage_type="pcr", name=f"Тест: DNA {dna}", reagent_config_json={"master_mix": 5, "h2o": 2, "dna": dna}, plate_rules_json={}, instrument_config_json={"_isolated_protocol_e2e": True}))
         await session.commit()
 
 

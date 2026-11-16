@@ -1,5 +1,5 @@
 import { BarChart3, ChevronDown, ChevronRight, ClipboardList, Database, FileDown, FilePlus2, FileStack, FileText, Home, LogOut, Minus, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Plus, Printer, RotateCcw, Search, Sun, Upload, Users, Waves } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { User } from '../api/types'
 
@@ -28,6 +28,10 @@ function storedSidebarCollapsed() {
 export function Shell({ user, active, onNavigate, onLogout, theme, themeMode, onTheme, uiScale, onScaleDown, onScaleUp, onScaleReset, children }: ShellProps) {
   const canEdit = user.role !== 'viewer'
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(storedSidebarCollapsed)
+  const desktopSidebarPreference = useRef(isSidebarCollapsed)
+  useEffect(() => {
+    if (!window.matchMedia('(max-width: 860px)').matches) desktopSidebarPreference.current = isSidebarCollapsed
+  }, [isSidebarCollapsed])
   const importViews = ['registry-import', 'rt-import', 'electrophoresis-import']
   const protocolViews = ['protocol-create', 'protocols']
   const [isImportOpen, setIsImportOpen] = useState(() => importViews.includes(active))
@@ -44,6 +48,15 @@ export function Shell({ user, active, onNavigate, onLogout, theme, themeMode, on
   }, [active])
   useEffect(() => {
     if (protocolViews.includes(active)) setIsProtocolsOpen(true)
+  }, [active])
+  useEffect(() => {
+    const isProtocol = protocolViews.includes(active)
+    document.body.classList.toggle('protocol-workspace', isProtocol)
+    const media = window.matchMedia('(max-width: 860px)')
+    const collapseOnSmallScreen = () => { if (isProtocol) setIsSidebarCollapsed(media.matches ? true : desktopSidebarPreference.current) }
+    collapseOnSmallScreen()
+    media.addEventListener('change', collapseOnSmallScreen)
+    return () => { document.body.classList.remove('protocol-workspace'); media.removeEventListener('change', collapseOnSmallScreen) }
   }, [active])
   const workItems = [
     { id: 'dashboard', label: 'Главная', icon: Home, visible: true },

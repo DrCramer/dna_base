@@ -8,6 +8,22 @@ from app.services.protocol_plate import build_protocol_layouts
 from app.services.protocol_calculations import calculate_dilution
 
 
+def test_excel_preserves_formula_like_text_and_actual_dilution_concentration():
+    objects = [{"id": 1, "rcsme_reg_no": "=1+1", "order_index": 0}]
+    snapshot = {
+        "protocol": {"protocol_date": "2026-11-16", "protocol_no": 1, "name": "=1+1"},
+        "objects": objects, "stages": [], "layouts": build_protocol_layouts(objects),
+        "calculations": {}, "dilutions": [{"object_id": 1, "display_name": "=1+1", **calculate_dilution(1.01, target_concentration=1)}],
+    }
+    original = copy.deepcopy(snapshot)
+    workbook = load_workbook(BytesIO(build_protocol_workbook(snapshot)), data_only=False)
+    for sheet, coordinate in [("Единая_плашка_A4", "F2"), ("Исходная плашка 1", "B3"), ("Dilution", "C2")]:
+        assert workbook[sheet][coordinate].value == "=1+1"
+        assert workbook[sheet][coordinate].data_type == "s"
+    assert abs(workbook["Dilution"]["E2"].value - 0.7575) < 1e-10
+    assert snapshot == original
+
+
 def test_protocol_excel_keeps_snapshot_order_and_multiple_pcr_plates():
     objects = [{"id": index, "rcsme_reg_no": f"ии{index}", "order_index": index - 1} for index in range(1, 97)]
     layouts = build_protocol_layouts(objects, {"nc_enabled": False})

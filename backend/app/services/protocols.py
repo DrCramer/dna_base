@@ -30,6 +30,7 @@ from app.services.protocol_calculations import (
     calculate_electrophoresis_reagents,
     calculate_electrophoresis_plate_reagents,
     calculate_pcr_reagents,
+    dilution_final_concentration,
 )
 from app.services.protocol_plate import (
     build_protocol_layouts,
@@ -337,6 +338,20 @@ async def _build_protocol_snapshot(
         )
     if dilution_optimization and dilution_optimization["blocked_object_count"]:
         warnings.append(f"У {dilution_optimization['blocked_object_count']} объектов разведение требует проверки: не найден вариант, соответствующий допуску и ограничениям объёмов.")
+    concentration_warnings = 0
+    for row in dilutions:
+        actual = dilution_final_concentration(row)
+        row["actual_final_concentration"] = actual
+        if actual is None or not row.get("steps"):
+            continue
+        error = 100 * (actual / row["target_concentration"] - 1)
+        under = payload.dilution.max_under_target_pct if payload.dilution.max_under_target_pct is not None else payload.dilution.allowed_concentration_error_percent
+        over = payload.dilution.max_over_target_pct if payload.dilution.max_over_target_pct is not None else payload.dilution.allowed_concentration_error_percent
+        row["concentration_out_of_tolerance"] = error < -under - 1e-9 or error > over + 1e-9
+        if row["concentration_out_of_tolerance"] and not payload.dilution.optimize_water_volumes:
+            concentration_warnings += 1
+    if concentration_warnings:
+        warnings.append(f"У {concentration_warnings} объектов концентрация по рабочим объёмам выходит за заданный допуск. Проверьте разведения или включите округление H₂O.")
     snapshot = {
         "schema_version": 2,
         "kind": payload.kind,

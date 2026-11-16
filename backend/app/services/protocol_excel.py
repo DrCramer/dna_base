@@ -6,6 +6,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from app.services.protocols import protocol_object_count
+from app.services.protocol_calculations import dilution_final_concentration
 
 
 THIN = Side(style="thin", color="000000")
@@ -95,10 +96,12 @@ def build_protocol_workbook(snapshot: dict[str, Any]) -> bytes:
         steps = item.get("steps", [])
         first = steps[0] if steps else {}
         second = steps[1] if len(steps) > 1 else {}
-        final_concentration = item.get("target_concentration")
+        final_concentration = dilution_final_concentration(item)
         note = None
         if item.get("available") is False:
             final_concentration = None
+        elif item.get("concentration_out_of_tolerance"):
+            note = "Концентрация по рабочим объёмам вне заданного допуска"
         elif item.get("available") and not steps:
             final_concentration = item.get("source_concentration")
             note = "Без разведения"
@@ -147,6 +150,10 @@ def build_protocol_workbook(snapshot: dict[str, Any]) -> bytes:
             cell.fill = PatternFill("solid", fgColor="D9EAF7")
     for ws in workbook.worksheets:
         ws.freeze_panes = "A2"
+        for row in ws:
+            for cell in row:
+                if isinstance(cell.value, str):
+                    cell.data_type = "s"
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()

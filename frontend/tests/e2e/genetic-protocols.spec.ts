@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
+import { assertIsolatedProtocolBackend } from './helpers/protocols'
 
 test('экспертизы: реальные список, два RT-файла, мишени, snapshot и печать', async ({ page }) => {
   test.setTimeout(90_000)
@@ -12,6 +13,7 @@ test('экспертизы: реальные список, два RT-файла,
   await page.goto('/')
   await page.getByRole('button', { name: 'Войти' }).click()
   await expect(page.getByText('ДНК реестр', { exact: true })).toBeVisible()
+  await assertIsolatedProtocolBackend(page)
   await page.getByRole('button', { name: 'Протоколы', exact: true }).click()
   await page.getByRole('button', { name: 'Создать', exact: true }).click()
   await page.getByRole('tab', { name: 'Генетические экспертизы' }).click()
@@ -119,6 +121,7 @@ test('экспертизы: импорт Excel сохраняет отдельн
   await page.goto('/')
   await page.getByRole('button', { name: 'Войти' }).click()
   await expect(page.getByText('ДНК реестр', { exact: true })).toBeVisible()
+  await assertIsolatedProtocolBackend(page)
   await page.getByRole('button', { name: 'Протоколы', exact: true }).click()
   await page.getByRole('button', { name: 'Создать', exact: true }).click()
   await page.getByRole('tab', { name: 'Генетические экспертизы' }).click()

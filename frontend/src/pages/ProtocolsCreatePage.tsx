@@ -45,7 +45,7 @@ function snapshotPreview(protocol: Protocol): ProtocolPreview | null {
     stages: snapshot.stages || [],
     layouts: snapshot.layouts,
     calculations: { ...(snapshot.calculations || { pcr: [], electrophoresis: {} }), ...protocol.plate_calculations },
-    dilutions: (snapshot.dilutions || []).map((row) => { const rt = rtByObject.get(row.object_id); return { ...row, active_target: row.active_target || 'small', source_kind: row.source_kind || protocol.kind || 'chs', rt_targets: row.rt_targets || { long: rt?.long_quantity ?? null, small: rt?.small_quantity ?? null, y: rt?.y_quantity ?? null } } }),
+    dilutions: (snapshot.dilutions || []).map((row) => { const rt = rtByObject.get(row.object_id); return { ...row, actual_final_concentration: protocol.dilution_concentrations?.[String(row.object_id)] ?? row.actual_final_concentration, active_target: row.active_target || 'small', source_kind: row.source_kind || protocol.kind || 'chs', rt_targets: row.rt_targets || { long: rt?.long_quantity ?? null, small: rt?.small_quantity ?? null, y: rt?.y_quantity ?? null } } }),
     dilution_optimization: snapshot.dilution_optimization || null,
     warnings: snapshot.warnings || [],
     snapshot: protocol.snapshot
@@ -109,7 +109,9 @@ export function ProtocolsCreatePage({ user, protocolId, initialKind = 'chs', onK
   const employees = useQuery({ queryKey: ['employees', 'protocol'], queryFn: () => api.employees('', undefined, undefined, undefined, false), staleTime: 30_000 })
   const profiles = useQuery({ queryKey: ['protocol-profiles'], queryFn: () => api.protocolProfiles(), staleTime: 30_000 })
   const sequencers = useQuery({ queryKey: ['reference-items', 'sequencer'], queryFn: () => api.referenceItems('sequencer'), staleTime: 30_000 })
-  const readOnly = protocol.data?.status === 'final' || protocol.data?.status === 'archived' || user.role === 'viewer'
+  const extractionKits = useQuery({ queryKey: ['reference-items', 'extraction_method'], queryFn: () => api.referenceItems('extraction_method'), staleTime: 30_000 })
+  const realtimeKits = useQuery({ queryKey: ['reference-items', 'quant_method'], queryFn: () => api.referenceItems('quant_method'), staleTime: 30_000 })
+  const readOnly = protocol.data?.status === 'final' || protocol.data?.status === 'archived' || protocol.data?.is_current === false || user.role === 'viewer'
   useEffect(() => setDilutionView((view) => ({ ...view, showAllTargets: dilutionSettings.show_all_targets })), [dilutionSettings.show_all_targets])
 
   useEffect(() => {
@@ -217,12 +219,13 @@ export function ProtocolsCreatePage({ user, protocolId, initialKind = 'chs', onK
   const previewMutation = useMutation({ gcTime: 0, mutationFn: api.previewProtocol, onSuccess: (result, submitted) => { if (submitted === activePayload.current) { calculatedPayload.current = submitted; setPreview(result) } } })
   const save = useMutation({
     gcTime: 0,
-    mutationFn: () => currentId ? api.updateProtocol(currentId, payload) : api.createProtocol(payload),
-    onSuccess: (saved) => {
+    mutationFn: (submitted: { id: number | null; payload: ProtocolPayload; expectedUpdatedAt?: string }) => submitted.id ? api.updateProtocol(submitted.id, submitted.payload, submitted.expectedUpdatedAt) : api.createProtocol(submitted.payload),
+    onSuccess: (saved, submitted) => {
       setCurrentId(saved.id)
       onProtocolId(saved.id)
-      hydratedId.current = null
-      setDirty(false)
+      const changedDuringSave = submitted.payload !== activePayload.current
+      hydratedId.current = changedDuringSave ? saved.id : null
+      setDirty(changedDuringSave)
       queryClient.setQueryData(['protocol', saved.id], saved)
       queryClient.invalidateQueries({ queryKey: ['protocols'] })
     }
@@ -234,7 +237,7 @@ export function ProtocolsCreatePage({ user, protocolId, initialKind = 'chs', onK
     const timer = window.setTimeout(() => { requestedPayload.current = payload; previewMutation.mutate(payload) }, 350)
     return () => window.clearTimeout(timer)
   }, [payload, readOnly, selectionResolving, selectionError, currentId, dirty, uniqueSelectedIds.length, selectionTooLarge, meta.isPending, previewMutation.isPending, save.isPending])
-  const finalize = useMutation({ mutationFn: () => api.finalizeProtocol(currentId as number), onSuccess: (saved) => { queryClient.setQueryData(['protocol', saved.id], saved); queryClient.invalidateQueries({ queryKey: ['protocols'] }) } })
+  const finalize = useMutation({ mutationFn: () => api.finalizeProtocol(currentId as number, protocol.data?.updated_at), onSuccess: (saved) => { queryClient.setQueryData(['protocol', saved.id], saved); queryClient.invalidateQueries({ queryKey: ['protocols'] }) } })
   const revise = useMutation({ mutationFn: () => api.reviseProtocol(currentId as number), onSuccess: (saved) => { setCurrentId(saved.id); onProtocolId(saved.id); hydratedId.current = null; queryClient.setQueryData(['protocol', saved.id], saved) } })
 
   function markDirty() { if (!readOnly) setDirty(true) }
@@ -392,16 +395,16 @@ export function ProtocolsCreatePage({ user, protocolId, initialKind = 'chs', onK
   if (currentId && protocol.isError) return <div className="page"><ErrorState error={protocol.error} onRetry={() => protocol.refetch()} /></div>
   return (
     <div className="page protocol-page">
-      <PageHeader title={currentId ? `${name} · версия ${protocol.data?.revision_no || 1}` : 'Создать протокол'} description={protocol.data?.status === 'final' ? 'Сохранённый протокол открыт только для чтения.' : 'Выберите объекты и заполните поля прямо в рабочем документе.'} actions={<div className="protocol-toolbar">
-        <button type="button" className="icon-button" onClick={requestBack}><ArrowLeft size={17} />Назад</button>
+      <PageHeader title={currentId ? `${name} · версия ${protocol.data?.revision_no || 1}` : 'Создать протокол'} description={protocol.data?.status === 'archived' ? 'Архив' : readOnly ? 'Сохранён' : save.isPending ? 'Сохранение...' : dirty ? 'Есть несохранённые изменения' : currentId ? 'Черновик · изменения сохранены' : 'Новый документ'} actions={<div className="protocol-toolbar">
+        <button type="button" className="icon-only" title="Назад" aria-label="Назад" onClick={requestBack}><ArrowLeft size={17} /></button>
         {currentId && (protocol.data?.revisions.length || 0) > 1 ? <select aria-label="История версий" value={currentId} onChange={(event) => { if (dirty && !window.confirm('Есть несохранённые изменения. Выйти без сохранения?')) return; const id = Number(event.target.value); setDirty(false); setCurrentId(id); onProtocolId(id); hydratedId.current = null }}><option value={currentId} disabled>Версия {protocol.data?.revision_no}</option>{protocol.data?.revisions.filter((item) => item.id !== currentId).map((item) => <option value={item.id} key={item.id}>Версия {item.revision_no} · {item.status === 'final' ? 'сохранён' : item.status === 'archived' ? 'архив' : 'черновик'}</option>)}</select> : null}
         {readOnly && protocol.data?.status === 'final' && user.role !== 'viewer' ? <button type="button" className="icon-button" disabled={revise.isPending} onClick={() => revise.mutate()}><FilePenLine size={17} />Редактировать протокол</button> : null}
-        {!readOnly ? <button type="button" className="primary compact" disabled={!uniqueSelectedIds.length || selectionTooLarge || save.isPending || previewMutation.isPending || selectionResolving || Boolean(selectionError) || selectionRangeError(selection)} onClick={() => save.mutate()}><Save size={17} />Сохранить черновик</button> : null}
-        {currentId && protocol.data?.status === 'draft' ? <button type="button" className="icon-button" disabled={dirty || finalize.isPending} title={dirty ? 'Сначала сохраните изменения' : ''} onClick={() => finalize.mutate()}><Check size={17} />Сохранён</button> : null}
-        <button type="button" className="icon-button" disabled={!previewReady} onClick={downloadNumbers}><Download size={17} />Скачать список номеров</button>
-        <button type="button" className="icon-button" disabled={!previewReady} onClick={() => openPrintSelection('preview')}><Eye size={17} />Предпросмотр печати</button>
-        <button type="button" className="icon-button" disabled={!previewReady} onClick={() => openPrintSelection('print')}><Printer size={17} />Печать</button>
-        {currentId ? <a className="icon-button" href={api.protocolExcelUrl(currentId)}><Download size={17} />Скачать RT</a> : null}
+        {!readOnly ? <button type="button" className="primary compact" aria-label="Сохранить черновик" disabled={!uniqueSelectedIds.length || selectionTooLarge || save.isPending || previewMutation.isPending || selectionResolving || Boolean(selectionError) || selectionRangeError(selection)} onClick={() => save.mutate({ id: currentId, payload, expectedUpdatedAt: protocol.data?.updated_at })}><Save size={17} />{save.isPending ? 'Сохранение...' : 'Сохранить черновик'}</button> : null}
+        {currentId && protocol.data?.status === 'draft' && !readOnly ? <button type="button" className="icon-button" disabled={dirty || save.isPending || finalize.isPending} title={dirty ? 'Сначала сохраните изменения' : ''} onClick={() => finalize.mutate()}><Check size={17} />Сохранён</button> : null}
+        <button type="button" className="icon-only" title="Скачать список номеров" aria-label="Скачать список номеров" disabled={!previewReady} onClick={downloadNumbers}><Download size={17} /></button>
+        <button type="button" className="icon-button protocol-toolbar-preview" disabled={!previewReady} onClick={() => openPrintSelection('preview')}><Eye size={17} />Предпросмотр печати</button>
+        <button type="button" className="icon-only" title="Печать" aria-label="Печать" disabled={!previewReady} onClick={() => openPrintSelection('print')}><Printer size={17} /></button>
+        {currentId ? <a className="icon-button" title="Скачать RT" aria-label="Скачать RT" href={api.protocolExcelUrl(currentId)}><Download size={17} />RT</a> : null}
       </div>} />
       <ProtocolSourceTabs kind={kind} onChange={changeKind} disabled={save.isPending || previewMutation.isPending || readOnly && user.role === 'viewer'} />
       {save.error || finalize.error || revise.error || previewMutation.error ? <div className="alert danger">{String((save.error || finalize.error || revise.error || previewMutation.error) instanceof Error ? (save.error || finalize.error || revise.error || previewMutation.error)?.message : 'Не удалось выполнить действие')}</div> : null}
@@ -416,7 +419,7 @@ export function ProtocolsCreatePage({ user, protocolId, initialKind = 'chs', onK
       {preview?.warnings.map((warning) => <div className="alert warning" key={warning}>{warning}</div>)}
       {importedWells.length ? <div className="protocol-controls print-hide"><strong>Раскладка Excel</strong>{!readOnly ? <button type="button" className="icon-button" onClick={() => { if (window.confirm('Перестроить плашки? Исходные лунки Excel будут заменены автоматической раскладкой.')) { setImportedWells([]); markDirty() } }}><RotateCw size={16} />Перестроить раскладку</button> : null}</div> : null}
       <div className="protocol-sheet-wrap">
-        <ProtocolSheet protocolDate={protocolDate} protocolNo={protocolNo} name={name} selectedCount={uniqueSelectedIds.length} stages={stages} plateRules={plateRules} preview={preview} profiles={profiles.data || []} employees={employees.data || []} sequencers={sequencers.data || []} readOnly={readOnly} dilutionView={dilutionView} dilutionSettings={dilutionSettings} onDilutionSettings={(patch) => { setDilutionSettings((current) => ({ ...current, ...patch })); markDirty() }} onDilutionHide={(hideNoDilution) => setDilutionView((view) => ({ ...view, hideNoDilution }))} onDilutionSort={sortDilutions} onDilutionPrintSettings={(patch) => setDilutionView((view) => ({ ...view, ...patch }))} onHeader={updateHeader} onStage={updateStage} onRules={updateRules} />
+        <ProtocolSheet protocolDate={protocolDate} protocolNo={protocolNo} name={name} selectedCount={uniqueSelectedIds.length} stages={stages} plateRules={plateRules} preview={preview} profiles={profiles.data || []} employees={employees.data || []} sequencers={sequencers.data || []} kits={[...(extractionKits.data || []), ...(realtimeKits.data || [])]} readOnly={readOnly} dilutionView={dilutionView} dilutionSettings={dilutionSettings} onDilutionSettings={(patch) => { setDilutionSettings((current) => ({ ...current, ...patch })); markDirty() }} onDilutionHide={(hideNoDilution) => setDilutionView((view) => ({ ...view, hideNoDilution }))} onDilutionSort={sortDilutions} onDilutionPrintSettings={(patch) => setDilutionView((view) => ({ ...view, ...patch }))} onHeader={updateHeader} onStage={updateStage} onRules={updateRules} />
       </div>
       {printSelectionOpen ? <div className="modal-backdrop" onMouseDown={() => setPrintSelectionOpen(false)}><div className="modal protocol-print-selection" role="dialog" aria-modal="true" aria-label="Что печатать" onMouseDown={(event) => event.stopPropagation()}>
         <h2>Что печатать</h2>

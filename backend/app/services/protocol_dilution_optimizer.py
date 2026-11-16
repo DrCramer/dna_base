@@ -280,6 +280,7 @@ def optimize_dilution_water_batches(rows: list[dict[str, Any]], settings: Protoc
             "reason": reason, "reason_code": reason_code if status == "blocked" else None,
             "first_dilution_remaining_volume": dna[0] + row["steps"][0]["water_volume"] - dna[1] if len(dna) == 2 else None,
         }
+        row["actual_final_concentration"] = actual
 
     def groups(step_index):
         batches: dict[float, list[dict[str, Any]]] = {}

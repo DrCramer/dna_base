@@ -7,6 +7,28 @@ import { paginateDilutionRowHeights } from '../../src/components/protocols/Proto
 import { formatRtConcentration, protocolReagentRows } from '../../src/components/protocols/ProtocolSupplementTables'
 import { parseTargetConcentration } from '../../src/components/protocols/ProtocolDilutionOptions'
 import { dilutionFinalConcentration, dilutionStatus } from '../../src/components/protocols/ProtocolSupplementTables'
+import { splitProtocolPrintText } from '../../src/components/protocols/ProtocolPrintSheet'
+import { assertIsolatedProtocolBackend } from './helpers/protocols'
+
+test('сквозной сценарий отклоняет backend без маркера тестовой БД', async () => {
+  const previous = process.env.DNA_E2E_ISOLATED
+  process.env.DNA_E2E_ISOLATED = '1'
+  try {
+    const page = { request: { get: async () => ({ ok: () => true, json: async () => [] }) } } as unknown as Page
+    await expect(assertIsolatedProtocolBackend(page)).rejects.toThrow('Backend не содержит маркер')
+  } finally {
+    if (previous === undefined) delete process.env.DNA_E2E_ISOLATED
+    else process.env.DNA_E2E_ISOLATED = previous
+  }
+})
+
+test('фактическая концентрация и разбиение длинного текста не подменяют исходные данные', () => {
+  expect(dilutionFinalConcentration({ object_id: 1, available: true, source_concentration: 1.01, target_concentration: 1, actual_final_concentration: 0.7575000000000001 })).toBe(0.7575)
+  const text = 'Комментарий с пробелами\nи переносами '.repeat(200)
+  const chunks = splitProtocolPrintText(text)
+  expect(chunks.join('')).toBe(text)
+  expect(chunks.every((chunk) => chunk.length <= 160)).toBe(true)
+})
 
 test('целевая концентрация принимает запятую и не принимает пустые и нечисловые значения', () => {
   for (const [text, value] of [['0,1', 0.1], ['1', 1], ['1,5', 1.5], ['1.5', 1.5], ['0,2', 0.2], ['0.5', 0.5]] as const) expect(parseTargetConcentration(text)).toBe(value)
@@ -92,11 +114,16 @@ async function fixture(page: Page, transform: (preview: ProtocolPreview, payload
   let previewRequests = 0
   let delayedRange: string | null = null
   let delayedRangeRequested = false
+  let saveDelay = 0
   await page.route('**/api/parties/years', (route) => route.fulfill({ json: { years: [year, year - 1], default_year: year } }))
   await page.route('**/api/parties?**', (route) => route.fulfill({ json: { items: [{ id: 205, party_no: '205', case_year: year, object_count: 120, status: 'active', raw_control_json: {} }], total: 1 } }))
   await page.route('**/api/protocols/objects**', async (route) => {
     const url = new URL(route.request().url())
     const p = url.searchParams
+    if (route.request().method() === 'POST') {
+      const body = route.request().postDataJSON() as Record<string, string | number | string[] | number[] | null>
+      Object.entries(body).forEach(([key, value]) => { if (value != null) p.set(key, Array.isArray(value) ? value.join(',') : String(value)) })
+    }
     if (url.pathname.endsWith('/filter-options')) { await route.fulfill({ json: ['кость', 'ткань'] }); return }
     const isResolve = url.pathname.endsWith('/resolve')
     const numbers = (p.get('numbers') || '').split(',').filter(Boolean)
@@ -145,6 +172,7 @@ async function fixture(page: Page, transform: (preview: ProtocolPreview, payload
   await page.route(/\/api\/protocols(?:\?.*)?$/, async (route) => {
     if (route.request().method() === 'POST') {
       const payload = route.request().postDataJSON() as ProtocolPayload
+      if (saveDelay) await new Promise((resolve) => setTimeout(resolve, saveDelay))
       const stamp = new Date().toISOString()
       saved = { id: 999001, series_key: 'selection-test', protocol_no: payload.protocol_no, protocol_date: payload.protocol_date, name: payload.name, status: 'draft', revision_no: 1, comment: payload.comment, created_by_user_id: null, created_at: stamp, updated_at: stamp, finalized_at: null, snapshot: preview(payload).snapshot, revisions: [{ id: 999001, revision_no: 1, status: 'draft', updated_at: stamp }] }
       await route.fulfill({ json: saved })
@@ -158,8 +186,116 @@ async function fixture(page: Page, transform: (preview: ProtocolPreview, payload
   await expect(page.getByText('ДНК реестр', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Протоколы' }).click()
   await page.getByRole('button', { name: 'Создать', exact: true }).click()
-  return { objects, saved: () => saved, selectionRequests: () => selectionRequests, previewRequests: () => previewRequests, delay: (range: string) => { delayedRange = range }, delayedRangeRequested: () => delayedRangeRequested }
+  return { objects, saved: () => saved, selectionRequests: () => selectionRequests, previewRequests: () => previewRequests, delay: (range: string) => { delayedRange = range }, delayedRangeRequested: () => delayedRangeRequested, delaySave: (milliseconds: number) => { saveDelay = milliseconds } }
 }
+
+test('изменения во время сохранения остаются в редакторе, Создать очищает прежний документ', async ({ page }) => {
+  const state = await fixture(page)
+  await page.getByRole('button', { name: 'Партии протокола' }).click()
+  await page.locator('.multi-party-modal input[type=checkbox]').check()
+  await page.getByRole('button', { name: 'Готово', exact: true }).click()
+  await page.getByPlaceholder('№ рег РЦСМЭ до').fill('3004-1')
+  const name = page.locator('.protocol-name-field input')
+  await name.fill('Отправленная версия')
+  await expect(page.getByRole('button', { name: 'Предпросмотр печати', exact: true })).toBeEnabled()
+  state.delaySave(1200)
+  const sent = page.waitForRequest((request) => request.method() === 'POST' && /\/api\/protocols$/.test(request.url()))
+  await page.getByRole('button', { name: 'Сохранить черновик' }).click()
+  await sent
+  await name.fill('Правки после отправки')
+  await expect(page.getByText('Есть несохранённые изменения', { exact: true })).toBeVisible()
+  await expect(name).toHaveValue('Правки после отправки')
+  expect(state.saved()?.name).toBe('Отправленная версия')
+  await expect(page.getByRole('button', { name: 'Предпросмотр печати', exact: true })).toBeEnabled()
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: 'Создать', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Создать протокол', exact: true })).toBeVisible()
+  await expect(page.locator('.protocol-selection-actions strong')).toHaveText('Выбрано: 0')
+  expect(page.url()).not.toContain('protocol_id=')
+})
+
+test('наборы Выделения и RealTime доступны из существующих справочников', async ({ page }) => {
+  await page.route('**/api/reference-items?**', (route) => {
+    const category = new URL(route.request().url()).searchParams.get('category')
+    const name = category === 'extraction_method' ? 'Тестовый набор выделения' : 'Тестовый набор RT'
+    return route.fulfill({ json: category === 'sequencer' ? [] : [{ id: 9001, category, name, is_active: true }] })
+  })
+  await fixture(page)
+  await page.locator('.protocol-stage').nth(0).getByLabel('Набор').selectOption({ label: 'Тестовый набор выделения' })
+  await page.locator('.protocol-stage').nth(1).getByLabel('Набор').selectOption({ label: 'Тестовый набор RT' })
+  await expect(page.locator('.protocol-stage').nth(0).getByLabel('Набор')).toHaveValue('kit:Тестовый набор выделения')
+  await expect(page.locator('.protocol-stage').nth(1).getByLabel('Набор')).toHaveValue('kit:Тестовый набор RT')
+})
+
+test('длинный список номеров передаётся через POST без переполнения URL', async ({ page }) => {
+  await fixture(page)
+  await page.getByRole('button', { name: 'Вставить список номеров', exact: true }).click()
+  const numbers = Array.from({ length: 2000 }, (_, index) => `${3001 + index}-1`)
+  await page.getByRole('dialog', { name: 'Вставить список номеров' }).locator('textarea').fill(numbers.join('\n'))
+  const sent = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/protocols/objects/resolve'))
+  await page.getByRole('button', { name: 'Применить', exact: true }).click()
+  const request = await sent
+  expect(request.url().length).toBeLessThan(200)
+  expect(request.postDataJSON().numbers).toEqual(numbers)
+  await expect(page.locator('.protocol-selection-actions strong')).toHaveText('Выбрано: 120')
+})
+
+test('длинный комментарий печатается полностью на страницах продолжения', async ({ page }, testInfo) => {
+  const comment = 'Примечание экспертизы с длинным текстом. '.repeat(160)
+  await fixture(page, (preview) => {
+    preview.calculations.pcr = preview.layouts.pcr.plates.map((plate) => ({ plate_index: plate.plate_index, components: [{ key: 'mix', label: 'Mix', per_reaction: 5, total: 16.5 }] }))
+    return preview
+  })
+  await page.getByRole('button', { name: 'Партии протокола' }).click()
+  await page.locator('.multi-party-modal input[type=checkbox]').check()
+  await page.getByRole('button', { name: 'Готово', exact: true }).click()
+  await page.getByPlaceholder('№ рег РЦСМЭ до').fill('3001-1')
+  await page.locator('.protocol-stage textarea').nth(2).fill(comment)
+  await expect(page.getByRole('button', { name: 'Предпросмотр печати', exact: true })).toBeEnabled()
+  await page.getByRole('button', { name: 'Предпросмотр печати', exact: true }).click()
+  const selection = page.getByRole('dialog', { name: 'Что печатать' })
+  for (const label of ['Выделение', 'RT', 'Форез', 'Разведения']) await selection.getByLabel(label, { exact: true }).uncheck()
+  await selection.getByRole('button', { name: 'Предпросмотр', exact: true }).click()
+  await expect(page.locator('.protocol-print-notes-page').first()).toBeVisible()
+  const notes = await page.locator('.protocol-print-notes-page td').allTextContents()
+  expect(notes.join('')).toContain(comment)
+  await page.emulateMedia({ media: 'print' })
+  await page.evaluate(() => document.body.classList.add('protocol-printing'))
+  const bounds = await page.locator('.protocol-print-page').evaluateAll((articles) => articles.map((article) => ({ height: article.clientHeight, content: article.scrollHeight })))
+  expect(bounds.every((item) => item.content <= item.height + 2)).toBe(true)
+  const footers = await page.locator('.protocol-print-page-number').allTextContents()
+  expect(footers).toEqual(bounds.map((_, index) => `Страница ${index + 1} из ${bounds.length}`))
+  await page.pdf({ path: testInfo.outputPath('long-comment.pdf'), preferCSSPageSize: true, printBackground: true })
+  await page.locator('.protocol-plate-print-page').screenshot({ path: testInfo.outputPath('long-comment-plate.png') })
+})
+
+test('панель протокола и таблица сохраняют геометрию на desktop и mobile', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await fixture(page)
+  await page.getByRole('button', { name: 'Партии протокола' }).click()
+  await page.locator('.multi-party-modal input[type=checkbox]').check()
+  await page.getByRole('button', { name: 'Готово', exact: true }).click()
+  await page.getByPlaceholder('№ рег РЦСМЭ до').fill('3004-1')
+  await expect(page.getByRole('button', { name: 'Предпросмотр печати', exact: true })).toBeEnabled()
+  await page.getByRole('button', { name: /Партии и объекты/ }).click()
+  await page.screenshot({ path: testInfo.outputPath('protocol-desktop.png'), fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.evaluate(() => document.documentElement.dataset.theme = 'light')
+  const header = page.locator('.protocol-page > .page-header')
+  await expect(header).toHaveCSS('position', 'sticky')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
+  const boxes = await header.locator('button, a, select').evaluateAll((elements) => elements.map((element) => { const box = element.getBoundingClientRect(); return { left: box.left, right: box.right, top: box.top, bottom: box.bottom } }))
+  for (const box of boxes) { expect(box.left).toBeGreaterThanOrEqual(0); expect(box.right).toBeLessThanOrEqual(391) }
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+    const a = boxes[i], b = boxes[j]
+    expect(a.left < b.right - 1 && a.right > b.left + 1 && a.top < b.bottom - 1 && a.bottom > b.top + 1).toBe(false)
+  }
+  await page.screenshot({ path: testInfo.outputPath('protocol-mobile-light.png') })
+  await page.evaluate(() => document.documentElement.dataset.theme = 'dark')
+  await page.screenshot({ path: testInfo.outputPath('protocol-mobile-dark.png') })
+  await page.evaluate(() => window.scrollTo(0, 700))
+  expect((await header.boundingBox())?.y).toBeGreaterThanOrEqual(-1)
+})
 
 test('слишком большая выборка не запускает preview и позволяет уточнить диапазон', async ({ page }) => {
   await page.route('**/api/protocols/meta?**', (route) => route.fulfill({ json: { protocol_date: new Date().toISOString().slice(0, 10), suggested_no: 1, suggested_name: 'limit-test', max_objects: 50 } }))
@@ -667,7 +803,7 @@ test('удобные объёмы воды сохраняют лунки, нас
   const first = dilutionRows.filter({ hasText: '3001-1' })
   await expect(first.locator('td').nth(7)).toHaveText('65')
   await expect(first.locator('td').nth(7)).toHaveAttribute('title', /До округления: 63 мкл\nДля работы: 65 мкл\nРасчётная концентрация:/)
-  await expect(first.locator('td').nth(4)).toHaveText('0.1')
+  await expect(first.locator('td').nth(4)).toHaveText('0.0970588')
   const coordinates = await first.locator('td').allTextContents()
   await page.getByText('Настройки округления', { exact: true }).click()
   await expect(page.getByLabel('Допуск концентрации, %')).toHaveValue('5')

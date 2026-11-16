@@ -36,6 +36,14 @@ def isolated_url():
             await connection.execute(text("INSERT INTO lab_protocols (series_key,protocol_no,protocol_date,name,snapshot_json) VALUES ('legacy',1,'2026-10-14','Legacy', CAST(:snapshot AS jsonb))"), {"snapshot": json.dumps({"schema_version": 1, "objects": [], "stages": []})})
         await engine.dispose()
     asyncio.run(legacy_seed())
+    command.upgrade(cfg, "0014_genetic_examinations")
+    async def duplicate_current_seed():
+        engine = create_async_engine(url)
+        async with engine.begin() as connection:
+            for revision in (1, 2):
+                await connection.execute(text("INSERT INTO lab_protocols (kind,series_key,protocol_no,protocol_date,name,revision_no,is_current,snapshot_json) VALUES ('chs','audit-legacy-series',1,'2099-01-01','Legacy duplicate',:revision,true,CAST(:snapshot AS jsonb))"), {"revision": revision, "snapshot": json.dumps({"objects": [], "stages": []})})
+        await engine.dispose()
+    asyncio.run(duplicate_current_seed())
     command.upgrade(cfg, "head")
     command.downgrade(cfg, "0013_lab_protocols")
     command.upgrade(cfg, "head")
@@ -343,3 +351,164 @@ async def test_viewer_can_read_but_cannot_import_or_change_protocols(client):
     finally:
         app.dependency_overrides.clear()
         app.dependency_overrides.update(old_overrides)
+
+
+async def audit_protocol(http, number, name="Audit"):
+    objects = await create_objects(http, 2026, [{"raw_name": f"AUDIT-{number}/1", "examination_no": f"AUDIT{number}"}])
+    payload = {"kind": "genetic_examination", "examination_year": 2026, "protocol_date": "2026-11-16", "protocol_no": number, "name": name, "object_ids": objects["object_ids"]}
+    response = await http.post("/api/protocols", json=payload)
+    assert response.status_code == 200, response.text
+    return response.json(), payload
+
+
+@pytest.mark.asyncio
+async def test_current_revision_migration_repairs_duplicates_without_deleting(client):
+    _, engine = client
+    async with engine.connect() as connection:
+        rows = (await connection.execute(text("SELECT revision_no,is_current FROM lab_protocols WHERE series_key='audit-legacy-series' ORDER BY revision_no"))).all()
+        assert rows == [(1, False), (2, True)]
+        assert (await connection.execute(text("SELECT count(*) FROM pg_indexes WHERE indexname='uq_lab_protocols_current_series'"))).scalar_one() == 1
+
+
+@pytest.mark.asyncio
+async def test_update_and_finalize_serialize_and_final_snapshot_stays_frozen(client, monkeypatch):
+    import app.api.protocols as routes
+    http, _ = client
+    saved, payload = await audit_protocol(http, 9001)
+    started, resume = asyncio.Event(), asyncio.Event()
+    original = routes.build_protocol_snapshot
+
+    async def delayed(*args, **kwargs):
+        started.set()
+        await resume.wait()
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(routes, "build_protocol_snapshot", delayed)
+    patch = asyncio.create_task(http.patch(f"/api/protocols/{saved['id']}", json={**payload, "name": "Before final"}))
+    await asyncio.wait_for(started.wait(), 5)
+    final = asyncio.create_task(http.post(f"/api/protocols/{saved['id']}/finalize"))
+    await asyncio.sleep(0.1)
+    assert not final.done()
+    resume.set()
+    updated, finalized = await asyncio.wait_for(asyncio.gather(patch, final), 10)
+    assert updated.status_code == finalized.status_code == 200
+    assert finalized.json()["name"] == "Before final"
+    assert (await http.patch(f"/api/protocols/{saved['id']}", json=payload)).status_code == 409
+    reopened = (await http.get(f"/api/protocols/{saved['id']}")).json()
+    assert reopened["snapshot"] == finalized.json()["snapshot"]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_revisions_return_one_current_draft(client, monkeypatch):
+    import app.api.protocols as routes
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from sqlalchemy.exc import IntegrityError
+    from app.models import LabProtocol
+    http, engine = client
+    saved, _ = await audit_protocol(http, 9002)
+    assert (await http.post(f"/api/protocols/{saved['id']}/finalize")).status_code == 200
+    ready = asyncio.Event()
+    count = 0
+    original = routes._lock_protocol_key
+
+    async def simultaneous(session, key):
+        nonlocal count
+        count += 1
+        if count == 2:
+            ready.set()
+        await asyncio.wait_for(ready.wait(), 5)
+        await original(session, key)
+
+    monkeypatch.setattr(routes, "_lock_protocol_key", simultaneous)
+    replies = await asyncio.wait_for(asyncio.gather(*[http.post(f"/api/protocols/{saved['id']}/revision") for _ in range(2)]), 10)
+    assert [response.status_code for response in replies] == [200, 200]
+    assert replies[0].json()["id"] == replies[1].json()["id"]
+    assert replies[0].json()["revision_no"] == 2
+    async with async_sessionmaker(engine)() as session:
+        current = list((await session.execute(select(LabProtocol).where(LabProtocol.series_key == saved["series_key"], LabProtocol.is_current.is_(True)))).scalars())
+        assert len(current) == 1
+        with pytest.raises(IntegrityError):
+            session.add(LabProtocol(kind="genetic_examination", series_key=saved["series_key"], protocol_no=9002, protocol_date=current[0].protocol_date, name="Invalid second current", revision_no=3, is_current=True, status="draft", snapshot_json={}))
+            await session.commit()
+        await session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_stale_editor_cannot_overwrite_newer_draft(client):
+    http, _ = client
+    saved, payload = await audit_protocol(http, 9003)
+    body = {**payload, "expected_updated_at": saved["updated_at"]}
+    updated = await http.patch(f"/api/protocols/{saved['id']}", json={**body, "name": "Newer draft"})
+    assert updated.status_code == 200, updated.text
+    stale = await http.patch(f"/api/protocols/{saved['id']}", json={**body, "name": "Stale overwrite"})
+    assert stale.status_code == 409
+    assert (await http.post(f"/api/protocols/{saved['id']}/finalize", json={"expected_updated_at": saved["updated_at"]})).status_code == 409
+    assert (await http.get(f"/api/protocols/{saved['id']}")).json()["name"] == "Newer draft"
+
+
+@pytest.mark.asyncio
+async def test_large_selection_post_matches_get_and_is_paginated(client):
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from app.models import Party, RegistryObject
+    http, engine = client
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        party = Party(party_no="8501", case_year=2026, object_count=3)
+        session.add(party)
+        await session.flush()
+        session.add_all([RegistryObject(party_id=party.id, party_no="8501", case_year=2026, rcsme_reg_no=f"{index}-1") for index in range(85010, 85013)])
+        await session.commit()
+    numbers = [f"{index}-1" for index in range(85010, 87010)]
+    result = await http.post("/api/protocols/objects/resolve", json={"case_year": 2026, "numbers": numbers})
+    assert result.status_code == 200, result.text
+    assert result.json()["total"] == 3
+    assert len(result.json()["missing_numbers"]) == 1997
+    small = await http.get("/api/protocols/objects/resolve", params={"case_year": 2026, "numbers": ",".join(numbers[:3])})
+    assert result.json()["object_ids"] == small.json()["object_ids"]
+    page = await http.post("/api/protocols/objects/search", json={"case_year": 2026, "selected_ids": result.json()["object_ids"], "quick": "selected", "limit": 1, "offset": 1})
+    assert page.status_code == 200, page.text
+    assert page.json()["total"] == 3 and len(page.json()["items"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_archive_aggregates_legacy_snapshot_without_returning_large_json(client):
+    http, engine = client
+    snapshot = {"objects": [{"id": 1, "party_no": "10"}, {"object_id": 1}, {"id": 2, "party_no": "2"}], "stages": [{"stage_type": "pcr", "enabled": True}, {"stage_type": "realtime", "enabled": False}], "layouts": {"large": "x" * 2_000_000}}
+    async with engine.begin() as connection:
+        await connection.execute(text("INSERT INTO lab_protocols (kind,series_key,protocol_no,protocol_date,name,snapshot_json) VALUES ('chs','audit-summary',9004,'2026-11-16','Audit summary',CAST(:snapshot AS jsonb))"), {"snapshot": json.dumps(snapshot)})
+    result = await http.get("/api/protocols", params={"q": "Audit summary"})
+    assert result.status_code == 200, result.text
+    assert len(result.content) < 3000
+    item = result.json()["items"][0]
+    assert item["object_count"] == 2
+    assert item["party_numbers"] == ["2", "10"]
+    assert item["stage_types"] == ["pcr"]
+
+
+@pytest.mark.asyncio
+async def test_cyrillic_excel_headers_and_text_not_formulas(client):
+    from urllib.parse import unquote
+    http, _ = client
+    saved, _ = await audit_protocol(http, 9005, "=1+1 Экспертиза")
+    response = await http.get(f"/api/protocols/{saved['id']}/excel")
+    assert response.status_code == 200, response.text
+    assert "Экспертиза" in unquote(response.headers["content-disposition"])
+    workbook = load_workbook(BytesIO(response.content), data_only=False)
+    cell = workbook["Единая_плашка_A4"]["F2"]
+    assert cell.value == "=1+1 Экспертиза" and cell.data_type == "s"
+
+
+@pytest.mark.asyncio
+async def test_uppercase_excel_can_be_previewed_and_applied(client):
+    http, _ = client
+    workbook = Workbook()
+    source = workbook.active
+    source.title = "Единая_плашка_A4"
+    source["A1"] = "Единый протокол"
+    source["A10"], source["B10"] = "A", "UPPER-1"
+    content = BytesIO()
+    workbook.save(content)
+    uploaded = await http.post("/api/protocols/genetic-examinations/excel/preview", data={"examination_year": "2026"}, files={"file": ("Protocol.XLSX", content.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert uploaded.status_code == 200, uploaded.text
+    preview = uploaded.json()
+    applied = await http.post("/api/protocols/genetic-examinations/excel/apply", json={"examination_year": 2026, "upload_id": preview["upload_id"], "items": [{"raw_name": item["raw_name"], "examination_no": "UPPER", "source_key": item["source_key"]} for item in preview["items"]]})
+    assert applied.status_code == 200, applied.text

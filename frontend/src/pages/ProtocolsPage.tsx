@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Archive, Copy, Eye, Plus, Printer, Search } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { ProtocolKind, ProtocolStatus, User } from '../api/types'
 import { ProtocolSourceTabs } from '../components/protocols/ProtocolSourceTabs'
@@ -11,6 +11,8 @@ const statusLabels: Record<ProtocolStatus, string> = { draft: 'Черновик'
 export function ProtocolsPage({ user, kind = 'chs', onKindChange, onCreate, onOpen, onPrint }: { user: User; kind?: ProtocolKind; onKindChange?: (kind: ProtocolKind) => void; onCreate: () => void; onOpen: (id: number) => void; onPrint: (id: number) => void }) {
   const queryClient = useQueryClient()
   const [q, setQ] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
+  useEffect(() => { const timer = window.setTimeout(() => setDebouncedQuery(q), 250); return () => window.clearTimeout(timer) }, [q])
   const [status, setStatus] = useState('')
   const [stageType, setStageType] = useState('')
   const [year, setYear] = useState(new Date().getFullYear())
@@ -30,12 +32,13 @@ export function ProtocolsPage({ user, kind = 'chs', onKindChange, onCreate, onOp
   const resolvedDateTo = period ? today : dateTo || undefined
   const parties = useQuery({ queryKey: ['parties', 'protocol-filters', year], queryFn: () => api.parties('', true, year), staleTime: 30_000, enabled: kind === 'chs' })
   const employees = useQuery({ queryKey: ['employees', 'protocol-filters'], queryFn: () => api.employees('', undefined, undefined, undefined, true), staleTime: 30_000 })
-  const protocols = useQuery({ queryKey: ['protocols', kind, q, status, stageType, year, partyId, examinationNo, objectNo, employeeId, resolvedDateFrom, resolvedDateTo, offset], queryFn: () => api.protocols({ kind, q, status: status || undefined, stage_type: stageType || undefined, year, party_id: kind === 'chs' ? partyId || undefined : undefined, examination_no: kind === 'genetic_examination' ? examinationNo || undefined : undefined, object_no: kind === 'genetic_examination' ? objectNo || undefined : undefined, employee_id: employeeId || undefined, date_from: resolvedDateFrom, date_to: resolvedDateTo, limit: 50, offset }) })
+  const protocols = useQuery({ queryKey: ['protocols', kind, debouncedQuery, status, stageType, year, partyId, examinationNo, objectNo, employeeId, resolvedDateFrom, resolvedDateTo, offset], queryFn: () => api.protocols({ kind, q: debouncedQuery, status: status || undefined, stage_type: stageType || undefined, year, party_id: kind === 'chs' ? partyId || undefined : undefined, examination_no: kind === 'genetic_examination' ? examinationNo || undefined : undefined, object_no: kind === 'genetic_examination' ? objectNo || undefined : undefined, employee_id: employeeId || undefined, date_from: resolvedDateFrom, date_to: resolvedDateTo, limit: 50, offset }) })
   const duplicate = useMutation({ mutationFn: ({ id, copyObjects }: { id: number; copyObjects: boolean }) => api.duplicateProtocol(id, copyObjects), onSuccess: (item) => { queryClient.invalidateQueries({ queryKey: ['protocols'] }); onOpen(item.id) } })
   const archive = useMutation({ mutationFn: api.archiveProtocol, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['protocols'] }) })
   return (
     <div className="page protocols-list-page">
-      <PageHeader title="Сохранённые протоколы" description="Черновики, сохранённые версии и архив лабораторных протоколов." actions={user.role !== 'viewer' ? <button type="button" className="primary compact" onClick={onCreate}><Plus size={18} />Создать</button> : null} />
+      <PageHeader title="Сохранённые протоколы" description={protocols.data ? `Найдено: ${protocols.data.total}` : undefined} actions={user.role !== 'viewer' ? <button type="button" className="primary compact" onClick={onCreate}><Plus size={18} />Создать</button> : null} />
+      {duplicate.error || archive.error ? <div className="alert danger" role="alert">{(duplicate.error || archive.error)?.message}</div> : null}
       <ProtocolSourceTabs kind={kind} onChange={(value) => { onKindChange?.(value); setPartyId(''); setExaminationNo(''); setObjectNo(''); setOffset(0) }} />
       <div className="protocol-list-filters">
         <div className="searchbox"><Search size={17} /><input value={q} onChange={(event) => { setQ(event.target.value); setOffset(0) }} placeholder={kind === 'chs' ? '№, название, партия, объект, набор...' : '№, название, экспертиза, объект, набор...'} /></div>
@@ -52,7 +55,7 @@ export function ProtocolsPage({ user, kind = 'chs', onKindChange, onCreate, onOp
       {protocols.isLoading ? <LoadingState title="Загрузка протоколов..." rows={7} /> : null}
       {protocols.isError ? <ErrorState error={protocols.error} onRetry={() => protocols.refetch()} /> : null}
       {!protocols.isLoading && protocols.data?.items.length ? <div className="protocol-list-table-wrap"><table className="protocol-list-table"><thead><tr><th>Дата</th><th>№</th><th>Название</th><th>{kind === 'chs' ? 'Партии' : 'Экспертизы'}</th><th>Объектов</th><th>Этапы</th><th>Автор</th><th>Изменён</th><th>Статус</th><th /></tr></thead><tbody>{protocols.data.items.map((item) => <tr key={item.id}><td>{new Date(`${item.protocol_date}T00:00:00`).toLocaleDateString('ru-RU')}</td><td>{item.protocol_no}</td><td><button type="button" className="link-button" onClick={() => onOpen(item.id)}>{item.name}</button><small>версия {item.revision_no}</small></td><td>{(kind === 'chs' ? item.party_numbers : item.examination_names || []).join(', ') || '—'}</td><td>{item.object_count}</td><td>{item.stage_types.length}</td><td>{item.author || '—'}</td><td>{new Date(item.updated_at).toLocaleString('ru-RU')}</td><td><StatusBadge tone={item.status === 'final' ? 'success' : item.status === 'archived' ? 'muted' : 'warning'}>{statusLabels[item.status]}</StatusBadge></td><td><div className="protocol-row-actions"><button type="button" className="icon-only" title="Открыть" onClick={() => onOpen(item.id)}><Eye size={16} /></button><button type="button" className="icon-only" title="Предпросмотр печати" onClick={() => onPrint(item.id)}><Printer size={16} /></button>{user.role !== 'viewer' ? <><button type="button" className="icon-only" title="Дублировать настройки" onClick={() => duplicate.mutate({ id: item.id, copyObjects: false })}><Copy size={16} /></button><button type="button" className="icon-only" title="Дублировать вместе с объектами" onClick={() => duplicate.mutate({ id: item.id, copyObjects: true })}><Copy size={16} /><span>+</span></button></> : null}{user.role === 'admin' && item.status !== 'archived' ? <button type="button" className="icon-only danger" title="Архивировать" onClick={() => window.confirm(`Архивировать ${item.name}?`) && archive.mutate(item.id)}><Archive size={16} /></button> : null}</div></td></tr>)}</tbody></table></div> : null}
-      {!protocols.isLoading && !protocols.data?.items.length ? <EmptyState title="Протоколы не найдены">Измените фильтры или создайте первый протокол.</EmptyState> : null}
+      {!protocols.isLoading && !protocols.isError && !protocols.data?.items.length ? <EmptyState title="Протоколы не найдены" /> : null}
       {(protocols.data?.total || 0) > 50 ? <div className="protocol-pagination"><button type="button" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 50))}>Назад</button><span>{offset + 1}–{Math.min(offset + 50, protocols.data?.total || 0)} из {protocols.data?.total}</span><button type="button" disabled={offset + 50 >= (protocols.data?.total || 0)} onClick={() => setOffset(offset + 50)}>Далее</button></div> : null}
     </div>
   )

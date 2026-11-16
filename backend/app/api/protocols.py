@@ -1,10 +1,12 @@
 from datetime import date, datetime, timezone
 from uuid import uuid4
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from sqlalchemy import Integer, String, and_, case, cast, exists, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.api.deps import admin_user, current_user, db_session, edit_user
 from app.models import (
@@ -43,9 +45,10 @@ from app.schemas import (
 )
 from app.services.audit import write_audit
 from app.services.protocol_excel import build_protocol_workbook
-from app.services.protocol_calculations import protocol_plate_calculations
+from app.services.protocol_calculations import protocol_plate_calculations, dilution_final_concentration
 from app.services.protocol_plate import natural_key
-from app.schemas.protocols import ProtocolKind
+from app.services.protocol_summary import protocol_summary_statement
+from app.schemas.protocols import ProtocolFinalizeRequest, ProtocolKind, ProtocolObjectSearchRequest
 from app.services.protocols import (
     build_protocol_snapshot,
     protocol_object_count,
@@ -272,6 +275,7 @@ def _protocol_out(protocol: LabProtocol, revisions: list[LabProtocol] | None = N
         name=protocol.name,
         status=protocol.status,
         revision_no=protocol.revision_no,
+        is_current=protocol.is_current,
         comment=protocol.comment,
         created_by_user_id=protocol.created_by_user_id,
         created_at=protocol.created_at,
@@ -279,6 +283,7 @@ def _protocol_out(protocol: LabProtocol, revisions: list[LabProtocol] | None = N
         finalized_at=protocol.finalized_at,
         snapshot=protocol.snapshot_json,
         plate_calculations=protocol_plate_calculations(protocol.snapshot_json or {}),
+        dilution_concentrations={str(row["object_id"]): dilution_final_concentration(row) for row in (protocol.snapshot_json or {}).get("dilutions", []) if row.get("object_id") is not None},
         revisions=[
             ProtocolRevisionOut(id=item.id, revision_no=item.revision_no, status=item.status, updated_at=item.updated_at)
             for item in revisions or []
@@ -286,11 +291,18 @@ def _protocol_out(protocol: LabProtocol, revisions: list[LabProtocol] | None = N
     )
 
 
-async def _protocol_or_404(session: AsyncSession, protocol_id: int) -> LabProtocol:
-    protocol = await session.get(LabProtocol, protocol_id)
+async def _protocol_or_404(session: AsyncSession, protocol_id: int, *, lock: bool = False) -> LabProtocol:
+    stmt = select(LabProtocol).where(LabProtocol.id == protocol_id)
+    if lock:
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
+    protocol = (await session.execute(stmt)).scalar_one_or_none()
     if not protocol:
         raise HTTPException(status_code=404, detail="Протокол не найден")
     return protocol
+
+
+async def _lock_protocol_key(session: AsyncSession, key: str) -> None:
+    await session.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"protocol:{key}"))))
 
 
 @router.get("/meta", response_model=ProtocolMetaOut)
@@ -371,6 +383,37 @@ async def protocol_object_filter_options(
     return _unique_text_options(descriptions)
 
 
+@router.post("/objects/search", response_model=ProtocolObjectListOut)
+async def search_protocol_objects(
+    payload: ProtocolObjectSearchRequest,
+    session: AsyncSession = Depends(db_session),
+    _user: User = Depends(current_user),
+):
+    items, total = await _object_rows(session, **payload.model_dump())
+    return ProtocolObjectListOut(items=items, total=total, limit=payload.limit, offset=payload.offset)
+
+
+@router.post("/objects/resolve", response_model=ProtocolObjectResolveOut)
+async def resolve_protocol_objects_post(
+    payload: ProtocolObjectSearchRequest,
+    session: AsyncSession = Depends(db_session),
+    _user: User = Depends(current_user),
+):
+    return await _resolve_protocol_objects(session, payload.model_dump(exclude={"limit", "offset"}))
+
+
+async def _resolve_protocol_objects(session: AsyncSession, filters: dict) -> ProtocolObjectResolveOut:
+    requested_numbers = _csv_strings(",".join(filters["numbers"]))
+    conditions = _object_conditions(**{**filters, "numbers": requested_numbers})
+    rows = (await session.execute(select(RegistryObject.id, RegistryObject.rcsme_reg_no).where(*conditions).order_by(*_object_order()))).all()
+    matched_keys = {(number or "").strip().casefold() for _, number in rows}
+    return ProtocolObjectResolveOut(
+        object_ids=[object_id for object_id, _ in rows], total=len(rows),
+        matched_numbers=[number for _, number in rows if number],
+        missing_numbers=[number for number in requested_numbers if number.casefold() not in matched_keys],
+    )
+
+
 @router.get("/objects/resolve", response_model=ProtocolObjectResolveOut)
 async def resolve_protocol_objects(
     party_ids: str | None = None,
@@ -387,8 +430,7 @@ async def resolve_protocol_objects(
     session: AsyncSession = Depends(db_session),
     _user: User = Depends(current_user),
 ):
-    requested_numbers = _csv_strings(numbers)
-    conditions = _object_conditions(
+    return await _resolve_protocol_objects(session, dict(
         party_ids=_csv_ints(party_ids),
         case_year=case_year,
         selected_ids=_csv_ints(selected_ids),
@@ -396,25 +438,11 @@ async def resolve_protocol_objects(
         description=description,
         rcsme_from=rcsme_from,
         rcsme_to=rcsme_to,
-        numbers=requested_numbers,
+        numbers=_csv_strings(numbers),
         object_type=object_type,
         box_no=box_no,
         quick=quick,
-    )
-    rows = (
-        await session.execute(
-            select(RegistryObject.id, RegistryObject.rcsme_reg_no)
-            .where(*conditions)
-            .order_by(*_object_order())
-        )
-    ).all()
-    matched_keys = {(number or "").strip().casefold() for _, number in rows}
-    return ProtocolObjectResolveOut(
-        object_ids=[object_id for object_id, _ in rows],
-        total=len(rows),
-        matched_numbers=[number for _, number in rows if number],
-        missing_numbers=[number for number in requested_numbers if number.casefold() not in matched_keys],
-    )
+    ))
 
 
 @router.get("/profiles", response_model=list[ProtocolProfileOut])
@@ -564,14 +592,13 @@ async def list_protocols(
             )
         )
     total = int((await session.execute(select(func.count(LabProtocol.id)).where(*conditions))).scalar_one())
-    protocols = list((await session.execute(select(LabProtocol).where(*conditions).order_by(LabProtocol.protocol_date.desc(), LabProtocol.protocol_no.desc()).limit(limit).offset(offset))).scalars())
+    protocols = (await session.execute(protocol_summary_statement().where(*conditions).order_by(LabProtocol.protocol_date.desc(), LabProtocol.protocol_no.desc(), LabProtocol.id.desc()).limit(limit).offset(offset))).all()
     user_ids = {item.created_by_user_id for item in protocols if item.created_by_user_id}
     authors = {item.id: item.username for item in (await session.execute(select(User).where(User.id.in_(user_ids)))).scalars()} if user_ids else {}
     items = []
     for protocol in protocols:
-        snapshot = protocol.snapshot_json or {}
-        objects = snapshot.get("objects", [])
-        items.append(ProtocolSummaryOut(id=protocol.id, kind=getattr(protocol, "kind", None) or snapshot.get("kind", "chs"), examination_names=sorted({f"{obj['examination_no']}-{obj['examination_year']}" for obj in objects if obj.get("examination_no") and obj.get("examination_year")}, key=natural_key), series_key=protocol.series_key, protocol_no=protocol.protocol_no, protocol_date=protocol.protocol_date, name=protocol.name, status=protocol.status, revision_no=protocol.revision_no, object_count=protocol_object_count(objects), party_numbers=sorted({str(item.get("party_no")) for item in objects if item.get("party_no")}, key=natural_key), stage_types=[item["stage_type"] for item in snapshot.get("stages", []) if item.get("enabled")], author=authors.get(protocol.created_by_user_id), updated_at=protocol.updated_at))
+        summary = protocol.object_summary
+        items.append(ProtocolSummaryOut(id=protocol.id, kind=protocol.kind, examination_names=sorted(summary["examination_names"], key=natural_key), series_key=protocol.series_key, protocol_no=protocol.protocol_no, protocol_date=protocol.protocol_date, name=protocol.name, status=protocol.status, revision_no=protocol.revision_no, object_count=summary["object_count"], party_numbers=sorted(summary["party_numbers"], key=natural_key), stage_types=protocol.stage_types, author=authors.get(protocol.created_by_user_id), updated_at=protocol.updated_at))
     return ProtocolListOut(items=items, total=total, limit=limit, offset=offset)
 
 
@@ -603,7 +630,7 @@ async def get_protocol(
     _user: User = Depends(current_user),
 ):
     protocol = await _protocol_or_404(session, protocol_id)
-    revisions = list((await session.execute(select(LabProtocol).where(LabProtocol.series_key == protocol.series_key).order_by(LabProtocol.revision_no.desc()))).scalars())
+    revisions = list((await session.execute(select(LabProtocol).options(load_only(LabProtocol.id, LabProtocol.revision_no, LabProtocol.status, LabProtocol.updated_at)).where(LabProtocol.series_key == protocol.series_key).order_by(LabProtocol.revision_no.desc()))).scalars())
     return _protocol_out(protocol, revisions)
 
 
@@ -614,20 +641,26 @@ async def update_protocol(
     session: AsyncSession = Depends(db_session),
     user: User = Depends(edit_user),
 ):
-    protocol = await _protocol_or_404(session, protocol_id)
-    if protocol.status != "draft":
+    protocol = await _protocol_or_404(session, protocol_id, lock=True)
+    if protocol.status != "draft" or not protocol.is_current:
         raise HTTPException(status_code=409, detail="Сохранённый протокол нельзя изменить. Создайте новую версию.")
     if payload.kind != protocol.kind:
         raise HTTPException(status_code=400, detail="Нельзя менять вид источников сохранённого протокола")
+    if payload.expected_updated_at is not None and payload.expected_updated_at != protocol.updated_at:
+        raise HTTPException(status_code=409, detail="Протокол уже изменён в другом окне. Откройте актуальную версию перед сохранением.")
     preview = await build_protocol_snapshot(session, payload)
     protocol.protocol_no = payload.protocol_no
     protocol.protocol_date = payload.protocol_date
     protocol.name = payload.name.strip()
     protocol.comment = payload.comment
     protocol.snapshot_json = preview["snapshot"]
-    await replace_protocol_relations(session, protocol, preview["snapshot"])
-    await write_audit(session, user, "lab_protocol", protocol.id, "protocol_updated", None, {"revision_no": protocol.revision_no, "object_count": preview["selected_count"]})
-    await session.commit()
+    try:
+        await replace_protocol_relations(session, protocol, preview["snapshot"])
+        await write_audit(session, user, "lab_protocol", protocol.id, "protocol_updated", None, {"revision_no": protocol.revision_no, "object_count": preview["selected_count"]})
+        await session.commit()
+    except IntegrityError as error:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail="Этот номер протокола уже занят на выбранную дату") from error
     await session.refresh(protocol)
     return _protocol_out(protocol)
 
@@ -635,12 +668,15 @@ async def update_protocol(
 @router.post("/{protocol_id}/finalize", response_model=ProtocolOut)
 async def finalize_protocol(
     protocol_id: int,
+    payload: ProtocolFinalizeRequest | None = Body(default=None),
     session: AsyncSession = Depends(db_session),
     user: User = Depends(edit_user),
 ):
-    protocol = await _protocol_or_404(session, protocol_id)
-    if protocol.status != "draft":
+    protocol = await _protocol_or_404(session, protocol_id, lock=True)
+    if protocol.status != "draft" or not protocol.is_current:
         raise HTTPException(status_code=409, detail="Финализировать можно только черновик")
+    if payload and payload.expected_updated_at is not None and payload.expected_updated_at != protocol.updated_at:
+        raise HTTPException(status_code=409, detail="Протокол уже изменён в другом окне. Откройте актуальную версию перед финализацией.")
     protocol.status = "final"
     protocol.finalized_at = datetime.now(timezone.utc)
     await write_audit(session, user, "lab_protocol", protocol.id, "protocol_finalized", {"status": "draft"}, {"status": "final", "revision_no": protocol.revision_no})
@@ -656,10 +692,14 @@ async def create_revision(
     user: User = Depends(edit_user),
 ):
     source = await _protocol_or_404(session, protocol_id)
-    current = (await session.execute(select(LabProtocol).where(LabProtocol.series_key == source.series_key, LabProtocol.is_current.is_(True)))).scalar_one()
+    await _lock_protocol_key(session, source.series_key)
+    current = (await session.execute(select(LabProtocol).where(LabProtocol.series_key == source.series_key, LabProtocol.is_current.is_(True)).with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
+    if current is None:
+        raise HTTPException(status_code=409, detail="У серии нет текущей версии. Откройте список протоколов заново.")
     if current.status == "draft":
         return _protocol_out(current)
     current.is_current = False
+    await session.flush()
     revision_no = int((await session.execute(select(func.max(LabProtocol.revision_no)).where(LabProtocol.series_key == source.series_key))).scalar_one()) + 1
     protocol = LabProtocol(kind=source.kind, series_key=source.series_key, protocol_no=source.protocol_no, protocol_date=source.protocol_date, name=source.name, status="draft", revision_no=revision_no, is_current=True, comment=source.comment, created_by_user_id=user.id, snapshot_json=source.snapshot_json)
     session.add(protocol)
@@ -680,6 +720,7 @@ async def duplicate_protocol(
 ):
     source = await _protocol_or_404(session, protocol_id)
     target_date = payload.protocol_date or date.today()
+    await _lock_protocol_key(session, f"number:{source.kind}:{target_date}")
     meta = await suggested_protocol_meta(session, target_date, source.kind)
     snapshot = {**source.snapshot_json, "protocol": {**source.snapshot_json.get("protocol", {}), "protocol_date": target_date.isoformat(), "protocol_no": meta["suggested_no"], "name": meta["suggested_name"]}}
     if not payload.copy_objects:
@@ -700,7 +741,7 @@ async def archive_protocol(
     session: AsyncSession = Depends(db_session),
     user: User = Depends(admin_user),
 ):
-    protocol = await _protocol_or_404(session, protocol_id)
+    protocol = await _protocol_or_404(session, protocol_id, lock=True)
     protocol.status = "archived"
     await write_audit(session, user, "lab_protocol", protocol.id, "protocol_archived", None, {"revision_no": protocol.revision_no})
     await session.commit()
@@ -713,7 +754,7 @@ async def delete_protocol(
     session: AsyncSession = Depends(db_session),
     user: User = Depends(admin_user),
 ):
-    protocol = await _protocol_or_404(session, protocol_id)
+    protocol = await _protocol_or_404(session, protocol_id, lock=True)
     if protocol.status != "archived":
         raise HTTPException(status_code=409, detail="Сначала архивируйте протокол")
     await write_audit(session, user, "lab_protocol", protocol.id, "protocol_deleted", {"name": protocol.name}, None)
@@ -730,8 +771,9 @@ async def export_protocol_excel(
 ):
     protocol = await _protocol_or_404(session, protocol_id)
     content = build_protocol_workbook(protocol.snapshot_json)
-    safe_name = "".join(char if char.isalnum() or char in "-_" else "_" for char in protocol.name)
-    return Response(content=content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="protocol_{safe_name}.xlsx"'})
+    safe_name = "".join(char if char.isalnum() or char in "-_" else "_" for char in protocol.name)[:180]
+    filename = quote(f"protocol_{safe_name}.xlsx", safe="")
+    return Response(content=content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="protocol_{protocol.id}.xlsx"; filename*=UTF-8\'\'{filename}'})
 
 
 @router.get("/{protocol_id}/exporters", response_model=list[ProtocolExporterOut])

@@ -18,6 +18,7 @@ interface Props {
   profiles: ProtocolProfile[]
   employees: Employee[]
   sequencers: ReferenceItem[]
+  kits?: ReferenceItem[]
   readOnly?: boolean
   onHeader: (patch: { protocolDate?: string; protocolNo?: number; name?: string }) => void
   onStage: (stageType: ProtocolStageSettings['stage_type'], patch: Partial<ProtocolStageSettings>) => void
@@ -30,7 +31,7 @@ interface Props {
   onDilutionPrintSettings: (patch: Partial<DilutionView>) => void
 }
 
-export function ProtocolSheet({ protocolDate, protocolNo, name, selectedCount, stages, plateRules, preview, profiles, employees, sequencers, readOnly, onHeader, onStage, onRules, dilutionView, dilutionSettings, onDilutionSettings, onDilutionHide, onDilutionSort, onDilutionPrintSettings }: Props) {
+export function ProtocolSheet({ protocolDate, protocolNo, name, selectedCount, stages, plateRules, preview, profiles, employees, sequencers, kits = [], readOnly, onHeader, onStage, onRules, dilutionView, dilutionSettings, onDilutionSettings, onDilutionHide, onDilutionSort, onDilutionPrintSettings }: Props) {
   const sourcePlates = preview?.layouts.source.plates || []
   const pcrPlates = preview?.layouts.pcr.plates || []
   return (
@@ -45,6 +46,8 @@ export function ProtocolSheet({ protocolDate, protocolNo, name, selectedCount, s
       <div className="protocol-stage-grid">
         {stages.map((stage) => {
           const stageProfiles = profiles.filter((item) => item.stage_type === stage.stage_type)
+          const stageKits = kits.filter((item) => item.category === (stage.stage_type === 'dna_extraction' ? 'extraction_method' : stage.stage_type === 'realtime' ? 'quant_method' : '') && !stageProfiles.some((profile) => profile.name === item.name))
+          const kitValue = stage.profile_id ? String(stage.profile_id) : stage.kit_name ? `kit:${stage.kit_name}` : ''
           const eligible = employees.filter((employee) => employee.is_active).sort((left, right) => {
             const leftPreferred = left.stage_roles.some((item) => item.is_active && item.stage_type === (stage.stage_type === 'dna_extraction' ? 'extraction' : stage.stage_type))
             const rightPreferred = right.stage_roles.some((item) => item.is_active && item.stage_type === (stage.stage_type === 'dna_extraction' ? 'extraction' : stage.stage_type))
@@ -54,7 +57,7 @@ export function ProtocolSheet({ protocolDate, protocolNo, name, selectedCount, s
             <section className="protocol-stage" key={stage.stage_type}>
               <h3>{stageLabels[stage.stage_type]}</h3>
               <label><span>Дата</span><input type="date" value={stage.work_date || ''} disabled={readOnly} onChange={(event) => onStage(stage.stage_type, { work_date: event.target.value || null })} /></label>
-              <label><span>Набор</span>{readOnly ? <output>{stage.kit_name || '—'}</output> : <select value={stage.profile_id || ''} onChange={(event) => { const id = Number(event.target.value) || null; const profile = stageProfiles.find((item) => item.id === id); onStage(stage.stage_type, { profile_id: id, kit_name: profile?.name || null }) }}><option value="">{stage.kit_name || '—'}</option>{stageProfiles.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select>}</label>
+              <label><span>Набор</span>{readOnly ? <output>{stage.kit_name || '—'}</output> : <select value={kitValue} onChange={(event) => { const value = event.target.value; const profile = stageProfiles.find((item) => String(item.id) === value); onStage(stage.stage_type, { profile_id: profile?.id || null, kit_name: profile?.name || (value.startsWith('kit:') ? value.slice(4) : null) }) }}><option value="">—</option>{stage.kit_name && !stage.profile_id && !stageKits.some((item) => item.name === stage.kit_name) ? <option value={`kit:${stage.kit_name}`}>{stage.kit_name}</option> : null}{stage.profile_id && !stageProfiles.some((item) => item.id === stage.profile_id) ? <option value={stage.profile_id}>{stage.kit_name || 'Неактивный профиль'}</option> : null}{stageProfiles.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}{stageKits.map((item) => <option value={`kit:${item.name}`} key={`kit-${item.id}`}>{item.name}</option>)}</select>}</label>
               <label className="protocol-performer-select"><span>Исполнители</span><select value="" disabled={readOnly} onChange={(event) => { const id = Number(event.target.value); if (id && !stage.performer_ids.includes(id)) onStage(stage.stage_type, { performer_ids: [...stage.performer_ids, id] }) }}><option value="">Добавить...</option>{eligible.map((employee) => <option key={employee.id} value={employee.id}>{employee.short_name || employee.full_name}</option>)}</select></label>
               <div className="protocol-performer-chips">{stage.performer_ids.map((id) => { const employee = employees.find((item) => item.id === id); const savedName = stage.performers?.find((item) => item.employee_id === id)?.display_name; return <span key={id}>{(readOnly ? savedName : undefined) || employee?.short_name || employee?.full_name || savedName || 'Исполнитель недоступен'}{!readOnly ? <button type="button" title="Убрать исполнителя" onClick={() => onStage(stage.stage_type, { performer_ids: stage.performer_ids.filter((item) => item !== id) })}><X size={12} /></button> : null}</span> })}</div>
               <div className="protocol-performer-chips">{(stage.performers || []).filter((item) => !item.employee_id).map((performer) => <span key={performer.display_name}>{performer.display_name}{!readOnly ? <button type="button" title="Убрать исполнителя" onClick={() => onStage(stage.stage_type, { performers: stage.performers?.filter((item) => item !== performer) })}><X size={12} /></button> : null}</span>)}</div>

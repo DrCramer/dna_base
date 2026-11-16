@@ -1015,6 +1015,7 @@ export interface Protocol {
   name: string
   status: ProtocolStatus
   revision_no: number
+  is_current?: boolean
   comment: string | null
   created_by_user_id: number | null
   created_at: string
@@ -1023,6 +1024,7 @@ export interface Protocol {
   snapshot: Record<string, unknown>
   revisions: Array<{ id: number; revision_no: number; status: ProtocolStatus; updated_at: string }>
   plate_calculations?: Pick<ProtocolPreview['calculations'], 'pcr' | 'electrophoresis_plates'>
+  dilution_concentrations?: Record<string, number | null>
 }
 
 export type ProtocolKind = 'chs' | 'genetic_examination'

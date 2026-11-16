@@ -15,7 +15,7 @@ class GeneticNumbersRequest(BaseModel):
 
 
 class GeneticExcelApply(GeneticNumbersRequest):
-    upload_id: str = Field(pattern=r"^[a-f0-9]{32}\.xlsx$")
+    upload_id: str = Field(pattern=r"^[a-f0-9]{32}\.[xX][lL][sS][xX]$")
     selected_fields: list[Literal["header", "stages", "layout"]] = Field(default_factory=lambda: ["header", "stages", "layout"])
     selected_stage_fields: list[Literal["date", "kit", "performers", "sequencer", "comment"]] = Field(default_factory=lambda: ["date", "kit", "performers", "sequencer", "comment"])
     well_mappings: dict[str, str] = Field(default_factory=dict, max_length=40000)

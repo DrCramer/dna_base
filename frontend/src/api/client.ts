@@ -171,6 +171,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   throw new Error(`${lastMessage}. API не найден: ${attempted.join(', ')}`)
 }
 
+function protocolObjectSearchBody(filters: { partyIds?: number[]; caseYear?: number; selectedIds?: number[]; q?: string; description?: string; rcsmeFrom?: string; rcsmeTo?: string; numbers?: string[]; quick?: string; limit?: number; offset?: number }) {
+  return { party_ids: filters.partyIds || [], case_year: filters.caseYear, selected_ids: filters.selectedIds || [], q: filters.q, description: filters.description, rcsme_from: filters.rcsmeFrom, rcsme_to: filters.rcsmeTo, numbers: filters.numbers || [], quick: filters.quick, limit: filters.limit ?? 100, offset: filters.offset ?? 0 }
+}
+
 export const api = {
   me: () => request<User>('/auth/me'),
   login: (username: string, password: string) =>
@@ -186,11 +190,13 @@ export const api = {
   geneticRtCommit: (payload: GeneticRtCommit) => request<{ objects: GeneticApplyResult['objects']; matched: number }>('/protocols/genetic-examinations/rt/commit', { method: 'POST', body: JSON.stringify(payload) }),
   protocolObjects: (filters: { partyIds?: number[]; caseYear?: number; selectedIds?: number[]; q?: string; description?: string; rcsmeFrom?: string; rcsmeTo?: string; numbers?: string[]; quick?: string; limit?: number; offset?: number }) => {
     const params = reportParams({ party_ids: filters.partyIds?.join(','), case_year: filters.caseYear, selected_ids: filters.selectedIds?.join(','), q: filters.q, description: filters.description, rcsme_from: filters.rcsmeFrom, rcsme_to: filters.rcsmeTo, numbers: filters.numbers?.join(','), quick: filters.quick, limit: filters.limit ?? 100, offset: filters.offset ?? 0 })
+    if (params.toString().length > 1500) return request<ProtocolObjectList>('/protocols/objects/search', { method: 'POST', body: JSON.stringify(protocolObjectSearchBody(filters)) })
     return request<ProtocolObjectList>(`/protocols/objects?${params.toString()}`)
   },
   protocolObjectFilterOptions: (partyIds: number[], caseYear?: number) => request<string[]>(`/protocols/objects/filter-options?${reportParams({ party_ids: partyIds.join(','), case_year: caseYear }).toString()}`),
   resolveProtocolObjects: (filters: { partyIds?: number[]; caseYear?: number; selectedIds?: number[]; q?: string; description?: string; rcsmeFrom?: string; rcsmeTo?: string; numbers?: string[]; quick?: string }) => {
     const params = reportParams({ party_ids: filters.partyIds?.join(','), case_year: filters.caseYear, selected_ids: filters.selectedIds?.join(','), q: filters.q, description: filters.description, rcsme_from: filters.rcsmeFrom, rcsme_to: filters.rcsmeTo, numbers: filters.numbers?.join(','), quick: filters.quick })
+    if (params.toString().length > 1500) return request<ProtocolObjectResolve>('/protocols/objects/resolve', { method: 'POST', body: JSON.stringify(protocolObjectSearchBody(filters)) })
     return request<ProtocolObjectResolve>(`/protocols/objects/resolve?${params.toString()}`)
   },
   protocolProfiles: (stageType?: string, includeInactive = false) => request<ProtocolProfile[]>(`/protocols/profiles?${reportParams({ stage_type: stageType, include_inactive: includeInactive }).toString()}`),
@@ -200,8 +206,8 @@ export const api = {
   protocols: (filters: Record<string, string | number | null | undefined>) => request<ProtocolList>(`/protocols?${reportParams(filters).toString()}`),
   protocol: (id: number) => request<Protocol>(`/protocols/${id}`),
   createProtocol: (payload: ProtocolPayload) => request<Protocol>('/protocols', { method: 'POST', body: JSON.stringify(payload) }),
-  updateProtocol: (id: number, payload: ProtocolPayload) => request<Protocol>(`/protocols/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
-  finalizeProtocol: (id: number) => request<Protocol>(`/protocols/${id}/finalize`, { method: 'POST' }),
+  updateProtocol: (id: number, payload: ProtocolPayload, expectedUpdatedAt?: string) => request<Protocol>(`/protocols/${id}`, { method: 'PATCH', body: JSON.stringify({ ...payload, expected_updated_at: expectedUpdatedAt }) }),
+  finalizeProtocol: (id: number, expectedUpdatedAt?: string) => request<Protocol>(`/protocols/${id}/finalize`, { method: 'POST', body: JSON.stringify({ expected_updated_at: expectedUpdatedAt }) }),
   reviseProtocol: (id: number) => request<Protocol>(`/protocols/${id}/revision`, { method: 'POST' }),
   duplicateProtocol: (id: number, copyObjects: boolean) => request<Protocol>(`/protocols/${id}/duplicate`, { method: 'POST', body: JSON.stringify({ copy_objects: copyObjects }) }),
   archiveProtocol: (id: number) => request<{ id: number; status: string }>(`/protocols/${id}/archive`, { method: 'POST' }),

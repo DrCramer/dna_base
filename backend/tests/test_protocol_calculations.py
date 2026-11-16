@@ -9,11 +9,36 @@ from app.services.protocol_calculations import (
     calculate_electrophoresis_plate_reagents,
     protocol_plate_calculations,
     calculate_pcr_reagents,
+    dilution_final_concentration,
     pcr_reaction_count,
 )
 from app.services.protocol_profile_seed import load_profile_rows
 from app.schemas.protocols import ProtocolDilutionSettings
 from app.services.protocol_plate import build_pcr_plates, count_active_electrophoresis_wells
+
+
+def test_dilution_result_uses_working_volumes_not_ideal_target():
+    row = calculate_dilution(1.01, target_concentration=1)
+    assert row["steps"] == [{"factor": 1.01, "dna_volume": 3, "water_volume": 1}]
+    assert row["actual_final_concentration"] == pytest.approx(0.7575)
+    legacy = {key: value for key, value in row.items() if key != "actual_final_concentration"}
+    assert dilution_final_concentration(legacy) == pytest.approx(0.7575)
+    assert dilution_final_concentration({**legacy, "available": False}) is None
+    assert dilution_final_concentration(calculate_dilution(0.4, target_concentration=1)) == 0.4
+
+
+@pytest.mark.asyncio
+async def test_preview_warns_if_actual_concentration_is_outside_tolerance(monkeypatch):
+    from unittest.mock import AsyncMock
+    from app.schemas.protocols import ProtocolPreviewRequest
+    from app.services import protocols
+    objects = [{"id": 1, "rcsme_reg_no": "1-1", "rt": {"small_quantity": 1.01}}]
+    stages = [{"stage_type": stage, "enabled": True, "sequencer_name": None} for stage in protocols.STAGE_ORDER]
+    monkeypatch.setattr(protocols, "protocol_object_snapshots", AsyncMock(return_value=objects))
+    monkeypatch.setattr(protocols, "_stage_snapshots", AsyncMock(return_value=(stages, {})))
+    preview = await protocols.build_protocol_snapshot(None, ProtocolPreviewRequest(protocol_date="2026-11-16", protocol_no=1, name="test", object_ids=[1], dilution={"target_concentration": 1}))
+    assert preview["dilutions"][0]["concentration_out_of_tolerance"] is True
+    assert any("по рабочим объёмам" in warning for warning in preview["warnings"])
 
 
 def test_electrophoresis_reagents_are_calculated_for_each_physical_plate():
@@ -95,7 +120,7 @@ def test_protocol_api_exposes_print_calculations_without_replacing_saved_snapsho
     }}
     original = copy.deepcopy(snapshot)
     stamp = datetime.now(timezone.utc)
-    protocol = LabProtocol(id=1, series_key="test", protocol_no=1, protocol_date=date(2026, 10, 14), name="test", status="final", revision_no=1, comment=None, created_by_user_id=None, created_at=stamp, updated_at=stamp, finalized_at=stamp, snapshot_json=snapshot)
+    protocol = LabProtocol(id=1, series_key="test", protocol_no=1, protocol_date=date(2026, 10, 14), name="test", status="final", revision_no=1, is_current=True, comment=None, created_by_user_id=None, created_at=stamp, updated_at=stamp, finalized_at=stamp, snapshot_json=snapshot)
     result = _protocol_out(protocol)
     assert result.snapshot == original
     assert protocol.snapshot_json == original

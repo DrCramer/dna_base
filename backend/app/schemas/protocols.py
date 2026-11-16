@@ -134,7 +134,27 @@ class ProtocolCreateRequest(ProtocolPreviewRequest):
 
 
 class ProtocolUpdateRequest(ProtocolPreviewRequest):
-    pass
+    expected_updated_at: datetime | None = None
+
+
+class ProtocolFinalizeRequest(BaseModel):
+    expected_updated_at: datetime | None = None
+
+
+class ProtocolObjectSearchRequest(BaseModel):
+    case_year: int | None = None
+    party_ids: list[int] = Field(default_factory=list, max_length=10000)
+    selected_ids: list[int] = Field(default_factory=list, max_length=10000)
+    numbers: list[str] = Field(default_factory=list, max_length=10000)
+    q: str | None = None
+    description: str | None = None
+    rcsme_from: str | None = None
+    rcsme_to: str | None = None
+    object_type: str | None = None
+    box_no: str | None = None
+    quick: str | None = None
+    limit: int = Field(default=100, ge=1, le=500)
+    offset: int = Field(default=0, ge=0)
 
 
 class ProtocolPreviewOut(BaseModel):
@@ -258,6 +278,7 @@ class ProtocolOut(BaseModel):
     name: str
     status: ProtocolStatus
     revision_no: int
+    is_current: bool = True
     comment: str | None
     created_by_user_id: int | None
     created_at: datetime
@@ -266,6 +287,7 @@ class ProtocolOut(BaseModel):
     snapshot: dict[str, Any]
     revisions: list[ProtocolRevisionOut] = Field(default_factory=list)
     plate_calculations: dict[str, Any] = Field(default_factory=dict)
+    dilution_concentrations: dict[str, float | None] = Field(default_factory=dict)
 
 
 class ProtocolDuplicateRequest(BaseModel):

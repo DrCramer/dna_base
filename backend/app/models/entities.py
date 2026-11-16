@@ -641,6 +641,7 @@ class LabProtocol(Base, TimestampMixin):
             "kind", "protocol_date", "protocol_no", "revision_no", name="uq_lab_protocols_kind_date_no_revision"
         ),
         Index("ix_lab_protocols_current_status", "is_current", "status"),
+        Index("uq_lab_protocols_current_series", "series_key", unique=True, postgresql_where=text("is_current"), sqlite_where=text("is_current")),
         Index("ix_lab_protocols_examination_year", text("CAST(snapshot_json->>'examination_year' AS INTEGER)"), postgresql_where=text("kind = 'genetic_examination'")),
     )
 

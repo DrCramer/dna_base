@@ -78,6 +78,7 @@ export function App() {
   const [protocolKind, setProtocolKind] = useState<ProtocolKind>(() => new URLSearchParams(window.location.search).get('protocol_kind') === 'genetic_examination' ? 'genetic_examination' : 'chs')
   const [protocolPrintOnOpen, setProtocolPrintOnOpen] = useState(false)
   const [protocolDirty, setProtocolDirty] = useState(false)
+  const [protocolEditorVersion, setProtocolEditorVersion] = useState(0)
   const [themeMode, setThemeMode] = useState<ThemeMode>(storedThemeMode)
   const [effectiveTheme, setEffectiveTheme] = useState<EffectiveTheme>(() => themeMode === 'auto' ? systemTheme() : themeMode)
   const [uiScale, setUiScale] = useState(storedUiScale)
@@ -195,7 +196,12 @@ export function App() {
     setUiScale((value) => Math.min(maxUiScale, Math.max(minUiScale, Math.round((value + direction * uiScaleStep) * 10) / 10)))
   }
   function navigate(next: string) {
-    if (view === 'protocol-create' && protocolDirty && next !== view && !window.confirm('Есть несохранённые изменения. Выйти без сохранения?')) return
+    if (view === 'protocol-create' && protocolDirty && (next !== view || next === 'protocol-create') && !window.confirm('Есть несохранённые изменения. Выйти без сохранения?')) return
+    if (next === 'protocol-create') {
+      setProtocolId(null)
+      setProtocolPrintOnOpen(false)
+      setProtocolEditorVersion((version) => version + 1)
+    }
     setProtocolDirty(false)
     setObjectId(null)
     setView(next)
@@ -233,7 +239,7 @@ export function App() {
   else if (view === 'parties') page = <PartiesPage user={user} onObjectOpen={setObjectId} onReportsOpen={openReports} initialPartyNo={partySelect?.partyNo} initialPartyYear={partySelect?.caseYear} onInitialPartyHandled={() => setPartySelect(null)} />
   else if (view === 'objects') page = <ObjectsPage initialQuery={objectsQuery} partyFilter={partyFilter} onQueryChange={setObjectsQuery} onPartyFilterChange={setPartyFilter} onOpen={setObjectId} onPartyOpen={openParty} />
   else if (view === 'work-sessions') page = <WorkSessionsPage user={user} />
-  else if (view === 'protocol-create') page = <ProtocolsCreatePage user={user} protocolId={protocolId} initialKind={protocolKind} onKindChange={setProtocolKind} printOnOpen={protocolPrintOnOpen} onPrintHandled={() => setProtocolPrintOnOpen(false)} onProtocolId={setProtocolId} onDirtyChange={setProtocolDirty} onBack={() => { setProtocolDirty(false); setProtocolPrintOnOpen(false); setProtocolId(null); setView('protocols') }} />
+  else if (view === 'protocol-create') page = <ProtocolsCreatePage key={protocolEditorVersion} user={user} protocolId={protocolId} initialKind={protocolKind} onKindChange={setProtocolKind} printOnOpen={protocolPrintOnOpen} onPrintHandled={() => setProtocolPrintOnOpen(false)} onProtocolId={setProtocolId} onDirtyChange={setProtocolDirty} onBack={() => { setProtocolDirty(false); setProtocolPrintOnOpen(false); setProtocolId(null); setView('protocols') }} />
   else if (view === 'protocols') page = <ProtocolsPage user={user} kind={protocolKind} onKindChange={setProtocolKind} onCreate={() => { setProtocolPrintOnOpen(false); setProtocolId(null); setView('protocol-create') }} onOpen={(id) => { setProtocolPrintOnOpen(false); setProtocolId(id); setView('protocol-create') }} onPrint={(id) => { setProtocolPrintOnOpen(true); setProtocolId(id); setView('protocol-create') }} />
   else if (view === 'search') page = <SearchPage onObjectOpen={setObjectId} onPartyOpen={openPartyInParties} />
   else if (view === 'reports') page = <ReportsPage user={user} onPartyOpen={openPartyInParties} />

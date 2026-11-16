@@ -28,6 +28,8 @@ export interface DilutionRow {
   target_concentration?: number | null
   total_factor?: number | null
   available?: boolean
+  actual_final_concentration?: number | null
+  concentration_out_of_tolerance?: boolean
   minimum_volume_available?: boolean
   minimum_volume_warning?: string | null
   steps?: Array<{ dna_volume?: number | null; water_volume?: number | null }>
@@ -79,10 +81,13 @@ export function formatRtConcentration(value: unknown) {
 
 export function dilutionFinalConcentration(row: DilutionRow) {
   if (row.available === false) return null
+  if (typeof row.actual_final_concentration === 'number') return Number(row.actual_final_concentration.toPrecision(6))
+  if (typeof row.optimization?.actual_final_concentration === 'number') return Number(row.optimization.actual_final_concentration.toPrecision(6))
   return row.available && !row.steps?.length ? row.source_concentration : row.target_concentration
 }
 
 export function dilutionStatus(row: DilutionRow) {
+  if (row.concentration_out_of_tolerance && row.steps?.length) return 'Концентрация вне допуска'
   if (!row.available || row.steps?.length) return null
   return typeof row.source_concentration === 'number' && typeof row.target_concentration === 'number' && row.source_concentration < row.target_concentration
     ? `Без разведения: исходная концентрация ниже цели ${formatProtocolValue(row.target_concentration)} нг/мкл`

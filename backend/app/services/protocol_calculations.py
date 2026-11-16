@@ -210,7 +210,24 @@ def calculate_dilution(
             steps = adjusted_steps
 
     result["steps"] = steps
+    result["actual_final_concentration"] = dilution_final_concentration(result)
     return result
+
+
+def dilution_final_concentration(row: dict[str, Any]) -> float | None:
+    """Результат по сохранённым рабочим объёмам, включая старые snapshot."""
+    if row.get("available") is False:
+        return None
+    source = row.get("source_concentration")
+    if not isinstance(source, (int, float)) or not math.isfinite(source) or source <= 0:
+        return None
+    actual = float(source)
+    for step in row.get("steps") or []:
+        dna, water = step.get("dna_volume"), step.get("water_volume")
+        if not isinstance(dna, (int, float)) or not isinstance(water, (int, float)) or not math.isfinite(dna + water) or dna <= 0 or water < 0:
+            return None
+        actual *= dna / (dna + water)
+    return actual if math.isfinite(actual) else None
 
 
 def _scale_dilution_step(

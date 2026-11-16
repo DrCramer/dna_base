@@ -51,7 +51,10 @@ async def test_snapshot_preserves_criteria_and_actual_manual_selection(monkeypat
 @pytest.mark.asyncio
 async def test_archive_counts_unique_snapshot_ids():
     protocol = SimpleNamespace(id=1, series_key="test", protocol_no=1, protocol_date=date(2026, 9, 30), name="test", status="draft", revision_no=1, created_by_user_id=None, updated_at=datetime.now(timezone.utc), snapshot_json={"objects": [{"id": 1}, {"object_id": 1}, {"id": 1}, {"id": 2}], "stages": []})
-    session = SimpleNamespace(execute=AsyncMock(side_effect=[SimpleNamespace(scalar_one=lambda: 1), SimpleNamespace(scalars=lambda: [protocol])]))
+    protocol.kind = "chs"
+    protocol.object_summary = {"object_count": 2, "party_numbers": [], "examination_names": []}
+    protocol.stage_types = []
+    session = SimpleNamespace(execute=AsyncMock(side_effect=[SimpleNamespace(scalar_one=lambda: 1), SimpleNamespace(all=lambda: [protocol])]))
 
     result = await list_protocols(year=None, limit=50, offset=0, session=session, _user=None)
 

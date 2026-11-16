@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import type { Protocol, ProtocolPayload, ProtocolPreview } from '../../src/api/types'
+import { assertIsolatedProtocolBackend } from './helpers/protocols'
 
 for (const kind of ['chs', 'genetic_examination'] as const) {
   test(`${kind}: цель разведения, валидация, рецептура, snapshot и печать`, async ({ page }, testInfo) => {
@@ -13,6 +14,7 @@ for (const kind of ['chs', 'genetic_examination'] as const) {
     await page.goto('/')
     await page.getByRole('button', { name: 'Войти' }).click()
     await expect(page.getByText('ДНК реестр', { exact: true })).toBeVisible()
+    await assertIsolatedProtocolBackend(page)
     if (kind === 'genetic_examination') {
       const created = await page.request.post('/api/protocols/genetic-examinations/numbers/apply', { data: { examination_year: 2026, items: names.map((raw_name) => ({ raw_name })) } })
       expect(created.ok()).toBe(true)
