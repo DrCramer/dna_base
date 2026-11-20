@@ -1100,3 +1100,15 @@ export interface GeneticRtCommit {
   mode: 'attempt' | 'replace'
   confirm_duplicate: boolean
 }
+export interface RcsmeLookupRow {
+  party_no: string | null
+  rcsme_reg_no: string
+  external_military_no: string | null
+}
+
+export interface RcsmeLookupResult {
+  rows: RcsmeLookupRow[]
+  missing: string[]
+  ambiguous: string[]
+  duplicates: number
+}

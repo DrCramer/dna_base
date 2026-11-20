@@ -3,9 +3,12 @@ import { Search, SearchCheck } from 'lucide-react'
 import { useState } from 'react'
 import { api } from '../api/client'
 import { EmptyState, LoadingState, PageHeader } from '../components/ui'
+import { RcsmeLookup } from '../components/RcsmeLookup'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 
 const searchExamples = ['6606-1', '6606-2026', 'ии1285', 'партия 196', 'Непомнящая', 'GlobalFiler', 'горелая кость']
+const searchTabs = [['general', 'Общий поиск'], ['rcsme', 'Таблица по номерам РЦСМЭ']] as const
+type SearchTab = typeof searchTabs[number][0]
 
 export function SearchPage({
   onObjectOpen,
@@ -15,18 +18,24 @@ export function SearchPage({
   onPartyOpen: (partyNo: string) => void
 }) {
   const [q, setQ] = useState('')
+  const [tab, setTab] = useState<SearchTab>('general')
+  const [lookupOpened, setLookupOpened] = useState(false)
+  const openTab = (key: SearchTab) => {
+    setTab(key)
+    if (key === 'rcsme') setLookupOpened(true)
+  }
   const debouncedQ = useDebouncedValue(q.trim(), 250)
   const { data, isFetching } = useQuery({
     queryKey: ['global-search', debouncedQ],
     queryFn: () => api.objects(debouncedQ),
-    enabled: debouncedQ.length > 1,
+    enabled: tab === 'general' && debouncedQ.length > 1,
     staleTime: 20_000,
     refetchOnWindowFocus: false
   })
   const parties = useQuery({
     queryKey: ['global-search', 'parties', debouncedQ],
     queryFn: () => api.parties(debouncedQ, false),
-    enabled: debouncedQ.length > 1,
+    enabled: tab === 'general' && debouncedQ.length > 1,
     staleTime: 20_000,
     refetchOnWindowFocus: false
   })
@@ -35,10 +44,19 @@ export function SearchPage({
   const foundCount = (data?.total ?? 0) + partyRows.length
   return (
     <div className="page">
-      <PageHeader
-        title="Поиск"
-        description="Поиск по объектам, партиям, номерам, следователям, этапам, исполнителям, методам и комментариям."
-      />
+      <PageHeader title="Поиск" />
+      <div className="protocol-source-tabs search-tabs" role="tablist" aria-label="Режим поиска">
+        {searchTabs.map(([key, label]) => (
+          <button key={key} type="button" role="tab" id={`search-tab-${key}`} aria-controls={`search-panel-${key}`} aria-selected={tab === key}
+            tabIndex={tab === key ? 0 : -1} className={tab === key ? 'active' : ''} onClick={() => openTab(key)}
+            onKeyDown={(event) => {
+              const next = event.key === 'Home' ? 'general' : event.key === 'End' ? 'rcsme'
+                : event.key === 'ArrowLeft' || event.key === 'ArrowRight' ? (key === 'general' ? 'rcsme' : 'general') : null
+              if (next) { event.preventDefault(); openTab(next); document.getElementById(`search-tab-${next}`)?.focus() }
+            }}>{label}</button>
+        ))}
+      </div>
+      <div className="search-tab-panel" id="search-panel-general" role="tabpanel" aria-labelledby="search-tab-general" hidden={tab !== 'general'}>
       <section className="section">
         <div className="searchbox"><Search size={18} /><input value={q} onChange={(event) => setQ(event.target.value)} placeholder="Номер, партия, исполнитель, метод, объект..." /></div>
         <div className="quick-filter-row">
@@ -97,6 +115,10 @@ export function SearchPage({
           </EmptyState>
         )}
       </section>
+      </div>
+      <div className="search-tab-panel" id="search-panel-rcsme" role="tabpanel" aria-labelledby="search-tab-rcsme" hidden={tab !== 'rcsme'}>
+        {lookupOpened ? <RcsmeLookup /> : null}
+      </div>
     </div>
   )
 }

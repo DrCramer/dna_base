@@ -35,8 +35,31 @@
   --stage-control-height: 30px;
 }
 
+/* Registry lookup */
+.search-tab-panel:not([hidden]) { display: grid; gap: 14px; }
+.rcsme-lookup-form { display: grid; gap: 12px; padding-block: 0 14px; border-bottom: 1px solid var(--border); }
+.rcsme-lookup-controls, .rcsme-lookup-result-bar, .rcsme-lookup-counts, .rcsme-lookup-file { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; }
+.rcsme-lookup-controls label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.rcsme-lookup-numbers { display: grid; gap: 6px; max-width: 580px; }
+.rcsme-lookup-numbers textarea { width: 100%; resize: vertical; }
+.rcsme-lookup-file span { overflow-wrap: anywhere; }
+.rcsme-lookup-file .rcsme-icon-only { padding-inline: 7px; }
+.rcsme-lookup-results, .rcsme-lookup-issues { display: grid; gap: 10px; }
+.rcsme-lookup-result-bar { justify-content: space-between; }
+.rcsme-lookup-counts { color: var(--muted); font-variant-numeric: tabular-nums; }
+.rcsme-lookup-counts strong { color: var(--text); }
+.rcsme-lookup-issues summary { width: fit-content; cursor: pointer; }
+.rcsme-lookup-issues details div { max-height: 135px; overflow: auto; overflow-wrap: anywhere; padding: 6px 0; }
+.rcsme-lookup-table { overflow: auto; border: 1px solid var(--border); }
+.rcsme-lookup-table table { width: 100%; border-collapse: collapse; }
+.rcsme-lookup-table th, .rcsme-lookup-table td { text-align: left; padding: 8px 10px; overflow-wrap: anywhere; }
+.rcsme-lookup-table th { background: var(--table-head); }
+.rcsme-lookup-table td { border-top: 1px solid var(--border); }
+.rcsme-lookup-table tr:nth-child(even) td { background: var(--table); }
+
 /* Laboratory protocols */
 .protocol-source-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+.protocol-source-tabs.search-tabs { margin-bottom: 0; }
 .protocol-source-tabs button { background: transparent; color: var(--muted); border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 9px 12px; font-size: 13px; white-space: normal; }
 .protocol-source-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 .genetic-selector-toolbar, .genetic-import-options { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; }

@@ -1,18 +1,56 @@
 import re
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import distinct, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import current_user, db_session
 from app.models import Party, RegistryObject, StageEvent, User
 from app.services.export import build_registry_workbook
+from app.services.rcsme_lookup import (
+    MAX_FILE_BYTES, MAX_NUMBERS, RcsmeLookupResult, RcsmeLookupRow,
+    build_rcsme_workbook, lookup_rcsme, parse_lookup_numbers,
+)
 
 
 router = APIRouter(prefix="/exports", tags=["exports"])
+XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+@router.post("/rcsme/preview", response_model=RcsmeLookupResult)
+async def preview_rcsme_lookup(
+    numbers: str = Form(default=""),
+    case_year: int | None = Form(default=None, ge=1900, le=2200),
+    file: UploadFile | None = File(default=None),
+    session: AsyncSession = Depends(db_session),
+    _user: User = Depends(current_user),
+):
+    if file is not None and numbers.strip():
+        raise HTTPException(status_code=422, detail="Загрузите файл или вставьте список, но не оба сразу.")
+    content = await file.read(MAX_FILE_BYTES + 1) if file is not None else b""
+    try:
+        ordered, duplicates = await run_in_threadpool(
+            parse_lookup_numbers, numbers, filename=(file.filename or "") if file is not None else "", content=content,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await lookup_rcsme(session, ordered, duplicates, case_year)
+
+
+@router.post("/rcsme.xlsx")
+async def export_rcsme_lookup(
+    rows: list[RcsmeLookupRow] = Body(min_length=1, max_length=MAX_NUMBERS),
+    _user: User = Depends(current_user),
+):
+    return Response(
+        await run_in_threadpool(build_rcsme_workbook, rows),
+        media_type=XLSX_MEDIA_TYPE,
+        headers={"Content-Disposition": 'attachment; filename="rcsme-matches.xlsx"'},
+    )
 
 
 STAGE_ALIASES = {

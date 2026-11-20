@@ -121,7 +121,7 @@ function registryExportParams(options: RegistryExportOptions) {
   return params
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, decode?: (response: Response) => Promise<T>): Promise<T> {
   const attempted: string[] = []
   let lastMessage = 'Ошибка запроса'
 
@@ -141,6 +141,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
 
     const contentType = response.headers.get('content-type') || ''
+    if (response.ok && decode && contentType.startsWith('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')) return decode(response)
     const body = await response.text()
     const parseJson = () => {
       if (!body.trim()) return null
@@ -176,6 +177,10 @@ function protocolObjectSearchBody(filters: { partyIds?: number[]; caseYear?: num
 }
 
 export const api = {
+  previewRcsmeLookup: (input: FormData) =>
+    request<import('./types').RcsmeLookupResult>('/exports/rcsme/preview', { method: 'POST', body: input }),
+  downloadRcsmeLookup: (rows: import('./types').RcsmeLookupRow[]) =>
+    request<Blob>('/exports/rcsme.xlsx', { method: 'POST', body: JSON.stringify(rows) }, (response) => response.blob()),
   me: () => request<User>('/auth/me'),
   login: (username: string, password: string) =>
     request<{ user: User }>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
